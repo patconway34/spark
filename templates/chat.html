@@ -220,6 +220,16 @@ let processing = false;    // prevent overlapping keyword checks
 const VOLUME_THRESHOLD = 10;
 const SILENCE_AFTER_SPEECH_MS = 2000;  // silence needed to trigger keyword check
 
+function score(a, b) {
+    if (a === b) return 1;
+    if (a.includes(b) || b.includes(a)) return 0.9;
+    let m = 0;
+    for (let i = 0; i < Math.min(a.length, b.length); i++) { if (a[i] === b[i]) m++; }
+    return m / Math.max(a.length, b.length);
+}
+
+let ALL_TARGETS = [];
+
 function sparkLog(msg) {
     fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({msg})}).catch(()=>{});
 }
@@ -432,65 +442,12 @@ async function checkClipForKeyword() {
                 const raw = sendKeyMatch[1].toLowerCase().trim().replace(/[^a-z ]/g, '');
                 sparkLog('SENDKEY_RAW: ' + raw);
 
-                // Score how well two strings match (0-1, higher = better)
-                function score(a, b) {
-                    if (a === b) return 1;
-                    if (a.includes(b) || b.includes(a)) return 0.9;
-                    let m = 0;
-                    for (let i = 0; i < Math.min(a.length, b.length); i++) { if (a[i] === b[i]) m++; }
-                    return m / Math.max(a.length, b.length);
-                }
-
-                // Build one flat list of all valid targets
-                const ALL_TARGETS = [
-                    // Keys
-                    ...[
-                        {names: ['enter', 'nter', 'inter', 'entr'], act: () => sendKey('Enter'), label: 'enter'},
-                        {names: ['tab', 'tabs', 'tap'], act: () => sendKey('Tab'), label: 'tab'},
-                        {names: ['shift tab', 'ship tab', 'shift tap'], act: () => sendKey('BTab'), label: 'shift tab'},
-                        {names: ['escape', 'scape', 'escap', 'scap'], act: () => sendKey('Escape'), label: 'escape'},
-                        {names: ['control c', 'ctrl c', 'control see'], act: () => sendKey('C-c'), label: 'ctrl-c'},
-                        {names: ['control z', 'ctrl z', 'control zee'], act: () => sendKey('C-z'), label: 'ctrl-z'},
-                        {names: ['control v', 'ctrl v', 'control vee'], act: () => sendKey('C-v'), label: 'ctrl-v'},
-                        {names: ['control d', 'ctrl d', 'control dee'], act: () => sendKey('C-d'), label: 'ctrl-d'},
-                        {names: ['up', 'app', 'uhp'], act: () => sendKey('Up'), label: 'up'},
-                        {names: ['down', 'don', 'doun'], act: () => sendKey('Down'), label: 'down'},
-                        {names: ['left', 'lef', 'lift'], act: () => sendKey('Left'), label: 'left'},
-                        {names: ['right', 'rite', 'write'], act: () => sendKey('Right'), label: 'right'},
-                        {names: ['yes', 'yep', 'yeah', 'yess'], act: () => sendKey('y Enter'), label: 'yes'},
-                        {names: ['no', 'nope', 'nah'], act: () => sendKey('n Enter'), label: 'no'},
-                        {names: ['one', 'won', 'wan'], act: () => sendKey('1 Enter'), label: '1'},
-                        {names: ['two', 'too', 'tu'], act: () => sendKey('2 Enter'), label: '2'},
-                        {names: ['three', 'tree', 'free'], act: () => sendKey('3 Enter'), label: '3'},
-                    ],
-                    // Navigation
-                    {names: ['main menu', 'main many', 'menu', 'lobby', 'go back', 'go home', 'home'], act: () => { window.location.href = '/'; }, label: 'main menu'},
-                    {names: ['clear', 'clair', 'kleer', 'klear'], act: () => {
-                        if (mainRecorder && mainRecorder.state === 'recording') try { mainRecorder.stop(); } catch(e) {}
-                        mainChunks = [];
-                        if (listening) startMainRecorder();
-                        setStatus('Recording cleared.');
-                    }, label: 'clear'},
-                    // Sessions
-                    ..._sessions.map(s => ({
-                        names: [s.name.toLowerCase(), s.id],
-                        act: () => {
-                            fetch('/api/session', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({id: s.id}),
-                            }).then(() => { window.location.href = '/chat'; });
-                        },
-                        label: 'session: ' + s.name,
-                    })),
-                ];
-
                 // Find best match across all targets
                 let bestScore = 0, bestTarget = null;
                 for (const t of ALL_TARGETS) {
                     for (const n of t.names) {
-                        const s = score(raw, n);
-                        if (s > bestScore) { bestScore = s; bestTarget = t; }
+                        const sc = score(raw, n);
+                        if (sc > bestScore) { bestScore = sc; bestTarget = t; }
                     }
                 }
 
@@ -741,6 +698,45 @@ window.addEventListener('load', async () => {
         const res = await fetch('/api/sessions');
         const data = await res.json();
         _sessions = data.sessions;
+        ALL_TARGETS = [
+            ...[
+                {names: ['enter', 'nter', 'inter', 'entr'], act: () => sendKey('Enter'), label: 'enter'},
+                {names: ['tab', 'tabs', 'tap'], act: () => sendKey('Tab'), label: 'tab'},
+                {names: ['shift tab', 'ship tab', 'shift tap'], act: () => sendKey('BTab'), label: 'shift tab'},
+                {names: ['escape', 'scape', 'escap', 'scap'], act: () => sendKey('Escape'), label: 'escape'},
+                {names: ['control c', 'ctrl c', 'control see'], act: () => sendKey('C-c'), label: 'ctrl-c'},
+                {names: ['control z', 'ctrl z', 'control zee'], act: () => sendKey('C-z'), label: 'ctrl-z'},
+                {names: ['control v', 'ctrl v', 'control vee'], act: () => sendKey('C-v'), label: 'ctrl-v'},
+                {names: ['control d', 'ctrl d', 'control dee'], act: () => sendKey('C-d'), label: 'ctrl-d'},
+                {names: ['up', 'app', 'uhp'], act: () => sendKey('Up'), label: 'up'},
+                {names: ['down', 'don', 'doun'], act: () => sendKey('Down'), label: 'down'},
+                {names: ['left', 'lef', 'lift'], act: () => sendKey('Left'), label: 'left'},
+                {names: ['right', 'rite', 'write'], act: () => sendKey('Right'), label: 'right'},
+                {names: ['yes', 'yep', 'yeah', 'yess'], act: () => sendKey('y Enter'), label: 'yes'},
+                {names: ['no', 'nope', 'nah'], act: () => sendKey('n Enter'), label: 'no'},
+                {names: ['one', 'won', 'wan'], act: () => sendKey('1 Enter'), label: '1'},
+                {names: ['two', 'too', 'tu'], act: () => sendKey('2 Enter'), label: '2'},
+                {names: ['three', 'tree', 'free'], act: () => sendKey('3 Enter'), label: '3'},
+            ],
+            {names: ['main menu', 'main many', 'menu', 'lobby', 'go back', 'go home', 'home'], act: () => { window.location.href = '/'; }, label: 'main menu'},
+            {names: ['clear', 'clair', 'kleer', 'klear'], act: () => {
+                if (mainRecorder && mainRecorder.state === 'recording') try { mainRecorder.stop(); } catch(e) {}
+                mainChunks = [];
+                if (listening) startMainRecorder();
+                setStatus('Recording cleared.');
+            }, label: 'clear'},
+            ..._sessions.map(s => ({
+                names: [s.name.toLowerCase(), s.id],
+                act: () => {
+                    fetch('/api/session', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({id: s.id}),
+                    }).then(() => { window.location.href = '/chat'; });
+                },
+                label: 'session: ' + s.name,
+            })),
+        ];
     } catch(e) {}
     // Don't seed — let the first stable screen get read back on entry
     // Start TTS polling if speaker was on

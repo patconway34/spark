@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Spark</title>
+    <style>
+        :root {
+            --flame: #3b82f6;
+            --flame-dim: #3b82f620;
+            --flame-mid: #3b82f640;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #terminal {
+            flex: 1;
+            border: none;
+            border-top: 2px solid var(--flame-mid);
+            width: 100%;
+        }
+        #status-bar {
+            padding: 0.3rem 0.75rem;
+            background: #111122;
+            border-top: 1px solid var(--flame-mid);
+            font-size: 0.75rem;
+            color: #888;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            white-space: normal;
+            max-height: 3rem;
+            overflow-y: auto;
+        }
+        #controls {
+            background: #111122;
+            border-top: 1px solid #2a2a4e;
+            padding: 0.3rem 0.4rem;
+            padding-bottom: calc(0.3rem + env(safe-area-inset-bottom, 0px));
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+        }
+        .key-row {
+            display: flex;
+            gap: 0.25rem;
+            justify-content: center;
+        }
+        .key-btn {
+            height: 34px;
+            flex: 1;
+            max-width: 60px;
+            border: 1px solid #3a3a5e;
+            border-radius: 6px;
+            background: #2a2a4e;
+            color: #ccc;
+            font-size: 0.7rem;
+            font-family: monospace;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .key-btn:active {
+            background: #5a5a8e;
+        }
+        .bar-btn {
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        #mic-btn {
+            background: #7b6ba8;
+            color: #fff;
+            transition: background 0.2s;
+        }
+        #mic-btn.listening {
+            background: #2ecc71;
+        }
+        #mic-btn.recording {
+            background: #e04040;
+            animation: pulse 1s infinite;
+        }
+        #stop-btn {
+            background: #e04040;
+            color: #fff;
+            display: none;
+        }
+        #speak-toggle {
+            background: #2a2a4e;
+            font-size: 1.1rem;
+        }
+        #stt-toggle {
+            background: #2a2a4e;
+            color: #ccc;
+            font-size: 0.6rem;
+            font-weight: bold;
+            width: 40px;
+            height: 40px;
+        }
+        #auto-btn {
+            background: #2a2a4e;
+            color: #888;
+            font-size: 0.6rem;
+            font-weight: bold;
+            width: 40px;
+            height: 40px;
+            transition: background 0.2s;
+        }
+        #auto-btn.active {
+            background: #2ecc71;
+            color: #fff;
+        }
+        .fire-btn { transition: transform 0.2s; opacity: 0.6; border-radius: 50%; border: 1px solid #333 !important; background: #111122 !important; }
+        .fire-btn.active { opacity: 1; transform: scale(1.25); border: 1px solid #555 !important; }
+        .fire-btn svg { animation: flame-glow 2s ease-in-out infinite; }
+        @keyframes flame-glow { 0%,100%{opacity:1} 50%{opacity:0.7} }
+        .fire-blue svg { filter: drop-shadow(0 0 2px #00bfff) drop-shadow(0 0 6px #00bfff) drop-shadow(0 0 10px #0080ff); }
+        .fire-green svg { filter: drop-shadow(0 0 2px #39ff14) drop-shadow(0 0 6px #39ff14) drop-shadow(0 0 10px #00cc00); }
+        .fire-yellow svg { filter: drop-shadow(0 0 2px #ffff00) drop-shadow(0 0 6px #ffdd00) drop-shadow(0 0 10px #ffaa00); }
+        .fire-red svg { filter: drop-shadow(0 0 2px #ff4444) drop-shadow(0 0 6px #ff2200) drop-shadow(0 0 10px #cc0000); }
+        .fire-purple svg { filter: drop-shadow(0 0 2px #bf5fff) drop-shadow(0 0 6px #9933ff) drop-shadow(0 0 10px #7700cc); }
+        .fire-orange svg { filter: drop-shadow(0 0 2px #ff8800) drop-shadow(0 0 6px #ff6600) drop-shadow(0 0 10px #cc4400); }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+    </style>
+</head>
+<body>
+
+<iframe id="terminal" src="{{ session.terminal_url or 'https://terminal.tradingdata.net' }}"></iframe>
+
+<div id="status-bar">Tap mic to start listening</div>
+
+<div id="controls">
+    <div class="key-row">
+        <button class="key-btn" onclick="sendKey('Escape')">Esc</button>
+        <button class="key-btn" onclick="sendKey('Tab')">Tab</button>
+        <button class="key-btn" onclick="sendKey('BTab')">⇧Tab</button>
+        <button class="key-btn" onclick="sendKey('Enter')">Enter</button>
+        <button class="key-btn" onclick="sendKey('C-z')">^Z</button>
+        <button class="key-btn" onclick="sendKey('C-c')">^C</button>
+        <button class="key-btn" onclick="sendKey('C-v')">^V</button>
+    </div>
+    <div class="key-row">
+        <button class="key-btn" onclick="sendKey('Up')">&#9650;</button>
+        <button class="key-btn" onclick="sendKey('Down')">&#9660;</button>
+        <button class="key-btn" onclick="sendKey('Left')">&#9664;</button>
+        <button class="key-btn" onclick="sendKey('Right')">&#9654;</button>
+    </div>
+    <div class="key-row" style="justify-content: center; gap: 0.5rem;">
+        <button id="stop-btn" class="bar-btn" onclick="stopSpeaking()" style="width:34px;height:34px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+            </svg>
+        </button>
+        <button id="mic-btn" class="bar-btn" onclick="toggleListening()" style="width:34px;height:34px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+        </button>
+        <button id="speak-toggle" class="bar-btn" onclick="toggleSpeak()" style="width:34px;height:34px;font-size:0.9rem;">
+            <span id="speak-icon">🔇</span>
+        </button>
+        <span style="width:8px;"></span>
+        <button class="bar-btn fire-btn fire-blue" onclick="switchSession('dev')" style="width:30px;height:30px;background:none;border:none;" id="fire-dev" title="Dev"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gb" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#0044ff"/><stop offset="100%" stop-color="#00ddff"/></linearGradient></defs><path fill="url(#gb)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="bar-btn fire-btn fire-green" onclick="switchSession('nimbus')" style="width:30px;height:30px;background:none;border:none;" id="fire-nimbus" title="Nimbus"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gn" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#006600"/><stop offset="100%" stop-color="#39ff14"/></linearGradient></defs><path fill="url(#gn)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="bar-btn fire-btn fire-yellow" onclick="switchSession('alpha')" style="width:30px;height:30px;background:none;border:none;" id="fire-alpha" title="Alpha"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gy" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#cc8800"/><stop offset="100%" stop-color="#ffff00"/></linearGradient></defs><path fill="url(#gy)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="bar-btn fire-btn fire-red" onclick="switchSession('bravo')" style="width:30px;height:30px;background:none;border:none;" id="fire-bravo" title="Bravo"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gr" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#990000"/><stop offset="100%" stop-color="#ff4444"/></linearGradient></defs><path fill="url(#gr)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="bar-btn fire-btn fire-purple" onclick="switchSession('charlie')" style="width:30px;height:30px;background:none;border:none;" id="fire-charlie" title="Charlie"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gp" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#4400aa"/><stop offset="100%" stop-color="#bf5fff"/></linearGradient></defs><path fill="url(#gp)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="bar-btn fire-btn fire-orange" onclick="switchSession('delta')" style="width:30px;height:30px;background:none;border:none;" id="fire-delta" title="Delta"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="go" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#993300"/><stop offset="100%" stop-color="#ff8800"/></linearGradient></defs><path fill="url(#go)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+    </div>
+    <div style="height: 68px;"></div>
+</div>
+
+<script>
+// --- State ---
+// Suppress "leave site" prompts
+window.onbeforeunload = null;
+window.addEventListener('beforeunload', (e) => { delete e.returnValue; });
+
+let listening = false;
+let speakEnabled = false;
+let lastTranscriptHash = '';
+let currentAudio = null;
+let isSpeaking = false;
+
+// --- Core ---
+let audioStream = null;
+let mainRecorder = null;   // full recording for Groq transcription
+let mainChunks = [];
+let clipRecorder = null;   // short clip recorder for keyword detection
+let clipChunks = [];
+let prevClipBlob = null;   // previous clip as a finished blob
+let clipInterval = null;
+let _sessions = [];  // loaded for session switching
+let audioContext = null;
+let analyser = null;
+let volumeInterval = null;
+let wasTalking = false;
+let silenceTimer = null;
+let processing = false;    // prevent overlapping keyword checks
+
+const VOLUME_THRESHOLD = 10;
+const SILENCE_AFTER_SPEECH_MS = 2000;  // silence needed to trigger keyword check
+const CLIP_DURATION_MS = 3000;         // rolling clip length
+
+function sparkLog(msg) {
+    fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({msg})}).catch(()=>{});
+}
+
+function sendKey(key) {
+    fetch('/api/key', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({key: key}),
+    });
+}
+
+function setStatus(text) {
+    document.getElementById('status-bar').textContent = text;
+}
+
+// --- TTS controls ---
+function toggleSpeak() {
+    speakEnabled = !speakEnabled;
+    document.getElementById('speak-icon').textContent = speakEnabled ? '🔊' : '🔇';
+    localStorage.setItem('speakEnabled', speakEnabled);
+    if (speakEnabled) pollTranscript();
+}
+
+function stopSpeaking() {
+    if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+        currentAudio = null;
+    }
+    isSpeaking = false;
+    document.getElementById('stop-btn').style.display = 'none';
+    setStatus(listening ? 'Recording... say "go ahead" to send' : 'Stopped');
+}
+
+// --- Mic toggle ---
+async function toggleListening() {
+    if (listening) {
+        listening = false;
+        stopListening();
+        document.getElementById('mic-btn').classList.remove('listening', 'recording');
+        setStatus('Mic off');
+        return;
+    }
+    await startListening();
+}
+
+async function startListening() {
+    try {
+        audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
+        startMainRecorder();
+        startVolumeMonitor();
+        listening = true;
+        document.getElementById('mic-btn').classList.add('listening');
+        setStatus('Recording... say "go ahead" to send');
+        sparkLog('MIC_ON');
+    } catch (e) {
+        setStatus('Mic access denied');
+        sparkLog('MIC_DENIED: ' + e.message);
+    }
+}
+
+function stopListening() {
+    stopVolumeMonitor();
+    stopClipCycle();
+    if (mainRecorder && mainRecorder.state === 'recording') {
+        try { mainRecorder.stop(); } catch(e) {}
+    }
+    mainRecorder = null;
+    mainChunks = [];
+    clipChunks = [];
+    prevClipBlob = null;
+    if (audioStream) {
+        audioStream.getTracks().forEach(t => t.stop());
+        audioStream = null;
+    }
+    sparkLog('MIC_OFF');
+}
+
+// --- Main recorder (continuous, full audio for transcription) ---
+function startMainRecorder() {
+    if (!audioStream) return;
+    mainChunks = [];
+    clipChunks = [];
+    prevClipBlob = null;
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+    mainRecorder = new MediaRecorder(audioStream, {mimeType});
+    mainRecorder.ondataavailable = (e) => { if (e.data.size > 0) mainChunks.push(e.data); };
+    mainRecorder.start();
+    sparkLog('MAIN_REC_START');
+}
+
+// --- Clip recorder (separate, for keyword detection) ---
+// Starts when voice detected, stops+checks on silence
+function stopClipCycle() {
+    if (clipRecorder && clipRecorder.state === 'recording') {
+        try { clipRecorder.stop(); } catch(e) {}
+    }
+    clipRecorder = null;
+    clipChunks = [];
+}
+
+function startNewClip() {
+    // Stop old one if still running
+    if (clipRecorder && clipRecorder.state === 'recording') {
+        try { clipRecorder.stop(); } catch(e) {}
+    }
+    if (!audioStream) return;
+    clipChunks = [];
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+    clipRecorder = new MediaRecorder(audioStream, {mimeType});
+    clipRecorder.ondataavailable = (e) => { if (e.data.size > 0) clipChunks.push(e.data); };
+    clipRecorder.start();
+    sparkLog('CLIP_REC_START');
+}
+
+// --- Volume monitoring ---
+async function startVolumeMonitor() {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === 'suspended') await audioContext.resume();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    const source = audioContext.createMediaStreamSource(audioStream);
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    volumeInterval = setInterval(() => {
+        if (isSpeaking || processing) return;
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+
+        if (avg > VOLUME_THRESHOLD) {
+            if (!wasTalking) {
+                wasTalking = true;
+                sparkLog('VOICE_START');
+                startNewClip();  // start recording a clip when speech begins
+            }
+            cancelSilenceTimer();
+            document.getElementById('mic-btn').classList.add('recording');
+            setStatus('Hearing you...');
+        } else if (wasTalking) {
+            document.getElementById('mic-btn').classList.remove('recording');
+            if (listening) document.getElementById('mic-btn').classList.add('listening');
+            if (!silenceTimer) {
+                silenceTimer = setTimeout(() => {
+                    silenceTimer = null;
+                    wasTalking = false;
+                    sparkLog('SILENCE -> checking keyword clip');
+                    setStatus('Checking for keyword...');
+                    checkClipForKeyword();
+                }, SILENCE_AFTER_SPEECH_MS);
+            }
+        }
+    }, 100);
+}
+
+function stopVolumeMonitor() {
+    if (volumeInterval) { clearInterval(volumeInterval); volumeInterval = null; }
+    if (audioContext) { audioContext.close(); audioContext = null; }
+    analyser = null;
+    wasTalking = false;
+    cancelSilenceTimer();
+}
+
+function cancelSilenceTimer() {
+    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+}
+
+// --- Check the short clip for "go ahead" or "clear" ---
+async function checkClipForKeyword() {
+    if (processing) return;
+    processing = true;
+
+    // Stop current clip to collect audio
+    if (clipRecorder && clipRecorder.state === 'recording') {
+        await new Promise(resolve => {
+            clipRecorder.onstop = resolve;
+            clipRecorder.stop();
+        });
+    }
+
+    if (clipChunks.length === 0 && !prevClipBlob) {
+        sparkLog('CLIP: no chunks');
+        processing = false;
+        if (listening) startNewClip();
+        setStatus('Recording... say "go ahead" to send');
+        return;
+    }
+
+    // Use current clip (it's a proper standalone recording)
+    const mimeType = clipRecorder ? clipRecorder.mimeType : 'audio/webm';
+    const ext = mimeType.includes('webm') ? 'webm' : 'm4a';
+    const blob = new Blob(clipChunks, {type: mimeType});
+    sparkLog('CLIP: sending ' + blob.size + ' bytes');
+
+    const formData = new FormData();
+    formData.append('audio', blob, `clip.${ext}`);
+
+    try {
+        const res = await fetch('/api/transcribe', {method: 'POST', body: formData});
+        const data = await res.json();
+        if (data.text) {
+            const heard = data.text.trim().toLowerCase();
+            sparkLog('CLIP_HEARD: ' + heard);
+            setStatus('Heard: "' + data.text.trim().substring(0, 50) + '"');
+
+            // Check for "send key [command]" first
+            const sendKeyMatch = heard.match(/send key\s+(.+?)\.?$/);
+            if (sendKeyMatch) {
+                const raw = sendKeyMatch[1].toLowerCase().trim().replace(/[^a-z ]/g, '');
+                sparkLog('SENDKEY_RAW: ' + raw);
+
+                // Score how well two strings match (0-1, higher = better)
+                function score(a, b) {
+                    if (a === b) return 1;
+                    if (a.includes(b) || b.includes(a)) return 0.9;
+                    let m = 0;
+                    for (let i = 0; i < Math.min(a.length, b.length); i++) { if (a[i] === b[i]) m++; }
+                    return m / Math.max(a.length, b.length);
+                }
+
+                // Build one flat list of all valid targets
+                const ALL_TARGETS = [
+                    // Keys
+                    ...[
+                        {names: ['enter', 'nter', 'inter', 'entr'], act: () => sendKey('Enter'), label: 'enter'},
+                        {names: ['tab', 'tabs', 'tap'], act: () => sendKey('Tab'), label: 'tab'},
+                        {names: ['shift tab', 'ship tab', 'shift tap'], act: () => sendKey('BTab'), label: 'shift tab'},
+                        {names: ['escape', 'scape', 'escap', 'scap'], act: () => sendKey('Escape'), label: 'escape'},
+                        {names: ['control c', 'ctrl c', 'control see'], act: () => sendKey('C-c'), label: 'ctrl-c'},
+                        {names: ['control z', 'ctrl z', 'control zee'], act: () => sendKey('C-z'), label: 'ctrl-z'},
+                        {names: ['control v', 'ctrl v', 'control vee'], act: () => sendKey('C-v'), label: 'ctrl-v'},
+                        {names: ['control d', 'ctrl d', 'control dee'], act: () => sendKey('C-d'), label: 'ctrl-d'},
+                        {names: ['up', 'app', 'uhp'], act: () => sendKey('Up'), label: 'up'},
+                        {names: ['down', 'don', 'doun'], act: () => sendKey('Down'), label: 'down'},
+                        {names: ['left', 'lef', 'lift'], act: () => sendKey('Left'), label: 'left'},
+                        {names: ['right', 'rite', 'write'], act: () => sendKey('Right'), label: 'right'},
+                        {names: ['yes', 'yep', 'yeah', 'yess'], act: () => sendKey('y Enter'), label: 'yes'},
+                        {names: ['no', 'nope', 'nah'], act: () => sendKey('n Enter'), label: 'no'},
+                        {names: ['one', 'won', 'wan'], act: () => sendKey('1 Enter'), label: '1'},
+                        {names: ['two', 'too', 'tu'], act: () => sendKey('2 Enter'), label: '2'},
+                        {names: ['three', 'tree', 'free'], act: () => sendKey('3 Enter'), label: '3'},
+                    ],
+                    // Navigation
+                    {names: ['main menu', 'main many', 'menu', 'lobby', 'go back', 'go home', 'home'], act: () => { window.location.href = '/'; }, label: 'main menu'},
+                    {names: ['clear', 'clair', 'kleer', 'klear'], act: () => {
+                        if (mainRecorder && mainRecorder.state === 'recording') try { mainRecorder.stop(); } catch(e) {}
+                        mainChunks = [];
+                        if (listening) startMainRecorder();
+                        setStatus('Recording cleared.');
+                    }, label: 'clear'},
+                    // Sessions
+                    ..._sessions.map(s => ({
+                        names: [s.name.toLowerCase(), s.id],
+                        act: () => {
+                            fetch('/api/session', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({id: s.id}),
+                            }).then(() => { window.location.href = '/chat'; });
+                        },
+                        label: 'session: ' + s.name,
+                    })),
+                ];
+
+                // Find best match across all targets
+                let bestScore = 0, bestTarget = null;
+                for (const t of ALL_TARGETS) {
+                    for (const n of t.names) {
+                        const s = score(raw, n);
+                        if (s > bestScore) { bestScore = s; bestTarget = t; }
+                    }
+                }
+
+                if (bestTarget && bestScore >= 0.5) {
+                    sparkLog('SENDKEY_MATCH: "' + raw + '" -> ' + bestTarget.label + ' (score=' + bestScore.toFixed(2) + ')');
+                    setStatus(bestTarget.label);
+                    bestTarget.act();
+                    processing = false;
+                    if (listening) startNewClip();
+                    return;
+                }
+
+                sparkLog('SENDKEY_NOMATCH: ' + raw + ' (best=' + bestScore.toFixed(2) + ')');
+                setStatus('No match for: ' + raw);
+                processing = false;
+                if (listening) startNewClip();
+                return;
+            }
+
+            if (heard.includes('go ahead')) {
+                sparkLog('CLIP_MATCH: go ahead -> full transcribe');
+                setStatus('GO AHEAD! Transcribing full recording...');
+                await sendFullRecording();
+            } else if (heard.includes('clear')) {
+                sparkLog('CLIP_MATCH: clear -> reset');
+                if (mainRecorder && mainRecorder.state === 'recording') {
+                    try { mainRecorder.stop(); } catch(e) {}
+                }
+                mainChunks = [];
+                if (listening) startMainRecorder();
+                setStatus('Recording cleared. Keep talking...');
+            } else {
+                setStatus('Recording... say "go ahead" to send');
+            }
+        } else {
+            setStatus('Recording... say "go ahead" to send');
+        }
+    } catch (e) {
+        sparkLog('CLIP_ERROR: ' + e.message);
+        setStatus('Recording... say "go ahead" to send');
+    }
+
+    processing = false;
+    // Start fresh clip
+    if (listening) startNewClip();
+}
+
+// --- Send full recording to Groq and then to tmux ---
+async function sendFullRecording() {
+    document.getElementById('mic-btn').classList.add('recording');
+
+    // Stop main recorder to collect audio
+    if (mainRecorder && mainRecorder.state === 'recording') {
+        await new Promise(resolve => {
+            mainRecorder.onstop = resolve;
+            mainRecorder.stop();
+        });
+    }
+
+    if (mainChunks.length === 0) {
+        sparkLog('FULL: no chunks');
+        if (listening) startMainRecorder();
+        document.getElementById('mic-btn').classList.remove('recording');
+        if (listening) document.getElementById('mic-btn').classList.add('listening');
+        return;
+    }
+
+    const mimeType = mainRecorder ? mainRecorder.mimeType : 'audio/webm';
+    const ext = mimeType.includes('webm') ? 'webm' : 'm4a';
+    const blob = new Blob(mainChunks, {type: mimeType});
+    sparkLog('FULL: sending ' + blob.size + ' bytes');
+    setStatus('Transcribing full recording...');
+
+    const formData = new FormData();
+    formData.append('audio', blob, `recording.${ext}`);
+
+    try {
+        const res = await fetch('/api/transcribe', {method: 'POST', body: formData});
+        const data = await res.json();
+        if (data.error) {
+            setStatus('Groq error: ' + data.error);
+            sparkLog('FULL_ERROR: ' + data.error);
+        } else if (data.text) {
+            // Strip "go ahead" from the end
+            let text = data.text.trim();
+            const words = text.split(/\s+/);
+            const lastTwo = words.slice(-2).map(w => w.toLowerCase().replace(/[^a-z]/g, '')).join(' ');
+            if (lastTwo === 'go ahead') { words.pop(); words.pop(); }
+            const lastOne = words.length > 0 ? words[words.length - 1].toLowerCase().replace(/[^a-z]/g, '') : '';
+            if (lastOne === 'ahead' || lastOne === 'go') { words.pop(); }
+            text = words.join(' ').trim();
+            if (text) {
+                setStatus('Sent: ' + text);
+                sparkLog('FULL_SEND: ' + text.substring(0, 80));
+                sendText(text);
+            } else {
+                setStatus('Nothing to send after stripping trigger');
+            }
+        }
+    } catch (e) {
+        setStatus('Groq failed: ' + e.message);
+        sparkLog('FULL_FETCH_ERROR: ' + e.message);
+    }
+
+    // Start fresh
+    mainChunks = [];
+    if (listening) startMainRecorder();
+    document.getElementById('mic-btn').classList.remove('recording');
+    if (listening) document.getElementById('mic-btn').classList.add('listening');
+}
+
+async function sendText(text) {
+    try {
+        const res = await fetch('/api/voice-text', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text: text}),
+        });
+        const data = await res.json();
+        if (data.error) setStatus('Error: ' + data.error);
+    } catch (e) {
+        setStatus('Error: ' + e.message);
+    }
+}
+
+// --- Retry last ---
+async function retryLast() {
+    setStatus('Retrying...');
+    try {
+        const res = await fetch('/api/retry', {method: 'POST'});
+        const data = await res.json();
+        if (data.ok) setStatus('Retried: ' + data.text);
+        else setStatus('Nothing to retry');
+    } catch (e) {
+        setStatus('Retry failed: ' + e.message);
+    }
+}
+
+// --- Auto-approve ---
+let autoEnabled = false;
+let autoInterval = null;
+
+function toggleAuto() {
+    autoEnabled = !autoEnabled;
+    document.getElementById('auto-btn').classList.toggle('active', autoEnabled);
+    if (autoEnabled) {
+        pollScreen();
+    } else if (autoInterval) {
+        clearTimeout(autoInterval);
+        autoInterval = null;
+    }
+}
+
+async function pollScreen() {
+    if (!autoEnabled) return;
+    try {
+        const res = await fetch('/api/screen');
+        const data = await res.json();
+        if (data.waiting) {
+            sendKey('Enter');
+            setStatus('Auto: approved prompt');
+        }
+    } catch (e) {}
+    autoInterval = setTimeout(pollScreen, 2000);
+}
+
+// --- TTS polling (screen capture, universal) ---
+async function pollTranscript() {
+    if (!speakEnabled) return;
+    if (isSpeaking) {
+        setTimeout(pollTranscript, 3000);
+        return;
+    }
+    try {
+        const res = await fetch('/api/screen-latest');
+        const data = await res.json();
+        if (data.text && data.hash !== lastTranscriptHash) {
+            lastTranscriptHash = data.hash;
+            const ttsRes = await fetch('/api/tts', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({text: data.text}),
+            });
+            if (ttsRes.ok) {
+                const blob = await ttsRes.blob();
+                currentAudio = new Audio(URL.createObjectURL(blob));
+                isSpeaking = true;
+
+                document.getElementById('stop-btn').style.display = 'flex';
+                currentAudio.onended = () => {
+                    isSpeaking = false;
+                    currentAudio = null;
+                    document.getElementById('stop-btn').style.display = 'none';
+                    setStatus(listening ? 'Listening... say "go ahead" to submit' : 'Ready');
+                };
+                currentAudio.play();
+                setStatus('Speaking: ' + data.text.substring(0, 80));
+            }
+        }
+    } catch (e) {}
+    if (speakEnabled) setTimeout(pollTranscript, 3000);
+}
+
+
+function switchSession(id) {
+    fetch('/api/session', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id}),
+    }).then(() => {
+        // Clean navigate — no "leave site" prompt
+        window.onbeforeunload = null;
+        window.location.replace('/chat');
+    });
+}
+
+const SESSION_COLORS = {
+    dev: '#00bfff', nimbus: '#39ff14', alpha: '#fbbf24',
+    bravo: '#ff4444', charlie: '#bf5fff', delta: '#ff8800',
+};
+
+function setThemeColor(id) {
+    const c = SESSION_COLORS[id] || '#3b82f6';
+    document.documentElement.style.setProperty('--flame', c);
+    document.documentElement.style.setProperty('--flame-dim', c + '20');
+    document.documentElement.style.setProperty('--flame-mid', c + '40');
+}
+
+function highlightActiveSession() {
+    const active = '{{ session.id }}';
+    document.querySelectorAll('.fire-btn').forEach(b => b.classList.remove('active'));
+    const el = document.getElementById('fire-' + active);
+    if (el) el.classList.add('active');
+    setThemeColor(active);
+}
+
+// Persist speaker state across page reloads
+if (localStorage.getItem('speakEnabled') === 'true') {
+    speakEnabled = true;
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('speak-icon').textContent = '🔊';
+    });
+}
+
+// Load sessions for voice switching, then auto-start mic
+window.addEventListener('load', async () => {
+    try {
+        const res = await fetch('/api/sessions');
+        const data = await res.json();
+        _sessions = data.sessions;
+    } catch(e) {}
+    // Don't seed — let the first stable screen get read back on entry
+    // Start TTS polling if speaker was on
+    if (speakEnabled) pollTranscript();
+    highlightActiveSession();
+    setTimeout(toggleListening, 500);
+});
+</script>
+</body>
+</html>

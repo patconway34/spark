@@ -1,0 +1,11 @@
+.env
+*.log
+*.pyc
+__pycache__/
+sessions.json
+transcripts/
+last_response.txt
+chat_summary.txt
+chat_full.txt
+.spark_input.txt
+examples/

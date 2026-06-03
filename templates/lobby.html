@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Spark — Lobby</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        h1 {
+            font-size: 24px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 32px;
+        }
+        .sessions {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+            max-width: 320px;
+        }
+        .session-card {
+            background: #1a1d27;
+            border: 2px solid #2a2d3a;
+            border-radius: 16px;
+            padding: 20px 24px;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .session-card:active {
+            background: #2a2d3a;
+        }
+        .session-card .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #333;
+            flex-shrink: 0;
+        }
+        .session-card .dot.alive { background: #2ecc71; }
+        .session-card .info { flex: 1; }
+        .session-card .name {
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .session-card .detail {
+            font-size: 12px;
+            color: #666;
+            margin-top: 2px;
+        }
+        #status-bar {
+            margin-top: 24px;
+            font-size: 13px;
+            color: #888;
+            text-align: center;
+        }
+        .mic-area {
+            margin-top: 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        #mic-btn {
+            width: 50px;
+            height: 50px;
+            border: none;
+            border-radius: 50%;
+            background: #7b6ba8;
+            color: #fff;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #mic-btn.listening { background: #2ecc71; }
+        #mic-btn.recording { background: #e04040; animation: pulse 1s infinite; }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        .hint { font-size: 11px; color: #555; }
+    </style>
+</head>
+<body>
+
+<h1>Spark</h1>
+<div class="subtitle">Tap or say "send key [name]"</div>
+
+<div id="sessions" class="sessions"></div>
+
+<div class="mic-area">
+    <button id="mic-btn" onclick="toggleMic()">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <line x1="12" y1="19" x2="12" y2="23"></line>
+            <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+    </button>
+    <div class="hint">just say a session name</div>
+</div>
+
+<div id="status-bar">Tap mic to use voice</div>
+
+<script>
+let sessions = [];
+let listening = false;
+let audioStream = null;
+let clipRecorder = null;
+let clipChunks = [];
+let audioContext = null;
+let analyser = null;
+let volumeInterval = null;
+let wasTalking = false;
+let silenceTimer = null;
+const VOLUME_THRESHOLD = 10;
+const SILENCE_MS = 2000;
+
+function setStatus(text) {
+    document.getElementById('status-bar').textContent = text;
+}
+
+async function loadSessions() {
+    const res = await fetch('/api/sessions');
+    const data = await res.json();
+    sessions = data.sessions;
+    renderSessions();
+}
+
+function renderSessions() {
+    const el = document.getElementById('sessions');
+    el.innerHTML = sessions.map(s => `
+        <div class="session-card" onclick="enterSession('${s.id}')">
+            <div class="dot"></div>
+            <div class="info">
+                <div class="name" id="name-${s.id}">${s.name}</div>
+                <div class="detail">tmux: ${s.tmux}</div>
+            </div>
+            <button onclick="event.stopPropagation(); renameSession('${s.id}')"
+                style="background:none;border:1px solid #333;border-radius:6px;color:#666;font-size:11px;padding:4px 8px;cursor:pointer;">rename</button>
+        </div>
+    `).join('');
+}
+
+async function renameSession(id) {
+    const current = sessions.find(s => s.id === id);
+    if (!current) return;
+    const name = prompt('Rename session:', current.name);
+    if (!name || !name.trim()) return;
+    const res = await fetch('/api/session/rename', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id, name: name.trim()}),
+    });
+    if (res.ok) {
+        current.name = name.trim();
+        renderSessions();
+    }
+}
+
+async function enterSession(id) {
+    await fetch('/api/session', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id}),
+    });
+    stopMic();
+    window.location.href = '/chat';
+}
+
+function fuzzyMatch(a, b) {
+    // Check if strings share enough characters to be a match
+    a = a.toLowerCase().replace(/[^a-z]/g, '');
+    b = b.toLowerCase().replace(/[^a-z]/g, '');
+    if (a.length < 2 || b.length < 2) return false;
+    if (a.includes(b) || b.includes(a)) return true;
+    // Check if first 2-3 chars match (handles "dev" vs "deb", "nimbus" vs "nimbis")
+    if (a.substring(0, 3) === b.substring(0, 3)) return true;
+    if (a.substring(0, 2) === b.substring(0, 2) && Math.abs(a.length - b.length) <= 2) return true;
+    // Levenshtein-lite: count matching chars
+    let matches = 0;
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+        if (a[i] === b[i]) matches++;
+    }
+    return matches / Math.max(a.length, b.length) > 0.6;
+}
+
+function matchSession(text) {
+    const words = text.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/);
+    // Try each word against each session name and id
+    for (const word of words) {
+        for (const s of sessions) {
+            if (fuzzyMatch(word, s.name) || fuzzyMatch(word, s.id)) {
+                return s;
+            }
+        }
+    }
+    // Also try the full text contains
+    const lower = text.toLowerCase();
+    for (const s of sessions) {
+        if (lower.includes(s.name.toLowerCase()) || lower.includes(s.id)) {
+            return s;
+        }
+    }
+    return null;
+}
+
+// --- Mic for voice session selection ---
+async function toggleMic() {
+    if (listening) {
+        stopMic();
+        document.getElementById('mic-btn').classList.remove('listening', 'recording');
+        setStatus('Tap mic to use voice');
+        return;
+    }
+    try {
+        audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
+        listening = true;
+        document.getElementById('mic-btn').classList.add('listening');
+        setStatus('Listening... say a session name');
+        startVolumeMonitor();
+    } catch(e) {
+        setStatus('Mic access denied');
+    }
+}
+
+function stopMic() {
+    listening = false;
+    if (volumeInterval) { clearInterval(volumeInterval); volumeInterval = null; }
+    if (audioContext) { audioContext.close(); audioContext = null; }
+    if (clipRecorder && clipRecorder.state === 'recording') {
+        try { clipRecorder.stop(); } catch(e) {}
+    }
+    if (audioStream) {
+        audioStream.getTracks().forEach(t => t.stop());
+        audioStream = null;
+    }
+    wasTalking = false;
+    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+}
+
+function startClip() {
+    if (!audioStream) return;
+    clipChunks = [];
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+    clipRecorder = new MediaRecorder(audioStream, {mimeType});
+    clipRecorder.ondataavailable = (e) => { if (e.data.size > 0) clipChunks.push(e.data); };
+    clipRecorder.start();
+}
+
+async function startVolumeMonitor() {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === 'suspended') await audioContext.resume();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    const source = audioContext.createMediaStreamSource(audioStream);
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    volumeInterval = setInterval(() => {
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+
+        if (avg > VOLUME_THRESHOLD) {
+            if (!wasTalking) {
+                wasTalking = true;
+                startClip();
+            }
+            if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+            document.getElementById('mic-btn').classList.add('recording');
+            setStatus('Hearing you...');
+        } else if (wasTalking) {
+            document.getElementById('mic-btn').classList.remove('recording');
+            document.getElementById('mic-btn').classList.add('listening');
+            if (!silenceTimer) {
+                silenceTimer = setTimeout(() => {
+                    silenceTimer = null;
+                    wasTalking = false;
+                    checkForSessionName();
+                }, SILENCE_MS);
+            }
+        }
+    }, 100);
+}
+
+async function checkForSessionName() {
+    if (clipRecorder && clipRecorder.state === 'recording') {
+        await new Promise(resolve => {
+            clipRecorder.onstop = resolve;
+            clipRecorder.stop();
+        });
+    }
+    if (clipChunks.length === 0) {
+        setStatus('Listening... say a session name');
+        return;
+    }
+
+    setStatus('Checking...');
+    const mimeType = clipRecorder ? clipRecorder.mimeType : 'audio/webm';
+    const ext = mimeType.includes('webm') ? 'webm' : 'm4a';
+    const blob = new Blob(clipChunks, {type: mimeType});
+    const fd = new FormData();
+    fd.append('audio', blob, `lobby.${ext}`);
+
+    try {
+        const res = await fetch('/api/transcribe', {method: 'POST', body: fd});
+        const data = await res.json();
+        if (data.text) {
+            const heard = data.text.trim().toLowerCase();
+            setStatus('Heard: "' + data.text.trim() + '"');
+
+            // Check for "send key [name]" with fuzzy matching
+            const sendKeyMatch = heard.match(/send key\s+(.+?)\.?$/);
+            if (sendKeyMatch) {
+                const target = sendKeyMatch[1].trim();
+                const match = matchSession(target);
+                if (match) {
+                    setStatus('Entering ' + match.name + '...');
+                    enterSession(match.id);
+                    return;
+                }
+            }
+
+            // Also try matching without "send key" prefix (lobby only has session choices)
+            const match = matchSession(heard);
+            if (match) {
+                setStatus('Entering ' + match.name + '...');
+                enterSession(match.id);
+                return;
+            } else {
+                setStatus('No match. Say "send key" + session name.');
+            }
+        } else {
+            setStatus('Listening...');
+        }
+    } catch(e) {
+        setStatus('Error: ' + e.message);
+    }
+}
+
+loadSessions();
+
+// Auto-start mic on page load
+window.addEventListener('load', () => { setTimeout(toggleMic, 500); });
+</script>
+</body>
+</html>

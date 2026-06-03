@@ -1,0 +1,4 @@
+flask
+gtts
+requests
+python-dotenv

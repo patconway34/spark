@@ -585,6 +585,40 @@ def _capture_pane():
         return ""
 
 
+def _clean_for_transcript(text: str) -> str:
+    """Filter UI chrome and code lines from terminal output; return prose only."""
+    import re
+    transcript_skip = re.compile(
+        r'(❯|^\s*\d+\.\s*(Yes|No)|Do you want to proceed|Esc to cancel|Tab to amend'
+        r'|\? for shortcuts|Bad\s+\d|Fine\s+\d|Good\s+\d|Dismiss'
+        r'|Command contains|command substitution|Bash command|Showing detailed'
+        r'|^\s*(Allow|Deny)\s*$|capture-pane|esc to interrupt'
+        r'|2>/dev/null|/dev/null|\.jsonl|\.py\b|\.txt\b|\.csv\b'
+        r'|/mnt/c/|C:\\|echo\s+"|grep\s|tail\s|wc\s|cat\s|mkdir\s|rm\s'
+        r'|medium\s+·|/effort|◐|◑)',
+        re.IGNORECASE
+    )
+    code_pattern = re.compile(
+        r'(^\s*\d+\s*\+|^\s*[\+\-]\s*\w|^\s*\+|'
+        r'def\s|return\s|import\s|class\s|function\s|const\s|let\s|var\s|'
+        r'jsonify|subprocess|innerHTML|addEventListener|querySelector|'
+        r'localStorage|getElementById|\.replace\(|\.split\(|\.join\(|'
+        r'\{.*\}|=>|===|!==)',
+        re.IGNORECASE
+    )
+    clean_lines = []
+    for l in text.strip().splitlines():
+        if not l.strip():
+            continue
+        if transcript_skip.search(l):
+            continue
+        if code_pattern.search(l):
+            continue
+        if l.startswith("  ") or l.startswith("\t"):
+            clean_lines.append(l.strip())
+    return "\n".join(clean_lines).strip()
+
+
 @app.route("/api/screen-latest")
 def screen_latest():
     """Poll-based idle detection + screen capture for TTS.
@@ -664,42 +698,8 @@ def screen_latest():
 
     state["last_spoken_text"] = text.strip()
 
-    # Clean text for transcript
-    transcript_skip = re.compile(
-        r'(❯|^\s*\d+\.\s*(Yes|No)|Do you want to proceed|Esc to cancel|Tab to amend'
-        r'|\? for shortcuts|Bad\s+\d|Fine\s+\d|Good\s+\d|Dismiss'
-        r'|Command contains|command substitution|Bash command|Showing detailed'
-        r'|^\s*(Allow|Deny)\s*$|capture-pane|esc to interrupt'
-        r'|2>/dev/null|/dev/null|\.jsonl|\.py\b|\.txt\b|\.csv\b'
-        r'|/mnt/c/|C:\\|echo\s+"|grep\s|tail\s|wc\s|cat\s|mkdir\s|rm\s'
-        r'|medium\s+·|/effort|◐|◑)',
-        re.IGNORECASE
-    )
-    # Code/diff pattern: lines starting with +/- (diffs), line numbers, or high code char density
-    code_pattern = re.compile(
-        r'(^\s*\d+\s*\+|^\s*[\+\-]\s*\w|^\s*\+|'
-        r'def\s|return\s|import\s|class\s|function\s|const\s|let\s|var\s|'
-        r'jsonify|subprocess|innerHTML|addEventListener|querySelector|'
-        r'localStorage|getElementById|\.replace\(|\.split\(|\.join\(|'
-        r'\{.*\}|=>|===|!==)',
-        re.IGNORECASE
-    )
-    clean_lines = []
-    for l in text.strip().splitlines():
-        if not l.strip():
-            continue
-        if transcript_skip.search(l):
-            continue
-        if code_pattern.search(l):
-            continue
-        # Keep indented lines (Claude's response) — skip unindented (user echo, commands)
-        if l.startswith("  ") or l.startswith("\t"):
-            clean_lines.append(l.strip())
-    clean_text = "\n".join(clean_lines).strip()
-
-    # Skip fragments under 20 chars
+    clean_text = _clean_for_transcript(text)
     if len(clean_text) >= 20:
-        # Summarize for transcript — distill to the key point
         try:
             from summarize import ask
             summary = ask(

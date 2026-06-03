@@ -4,140 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Spark</title>
-    <style>
-        :root {
-            --flame: #3b82f6;
-            --flame-dim: #3b82f620;
-            --flame-mid: #3b82f640;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            background: #1a1a2e;
-            color: #e0e0e0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        #terminal {
-            flex: 1;
-            border: none;
-            border-top: 2px solid var(--flame-mid);
-            width: 100%;
-        }
-        #status-bar {
-            padding: 0.3rem 0.75rem;
-            background: #111122;
-            border-top: 1px solid var(--flame-mid);
-            font-size: 0.75rem;
-            color: #888;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-            white-space: normal;
-            max-height: 3rem;
-            overflow-y: auto;
-        }
-        #controls {
-            background: #111122;
-            border-top: 1px solid #2a2a4e;
-            padding: 0.3rem 0.4rem;
-            padding-bottom: calc(0.3rem + env(safe-area-inset-bottom, 0px));
-            display: flex;
-            flex-direction: column;
-            gap: 0.3rem;
-        }
-        .key-row {
-            display: flex;
-            gap: 0.25rem;
-            justify-content: center;
-        }
-        .key-btn {
-            height: 34px;
-            flex: 1;
-            max-width: 60px;
-            border: 1px solid #3a3a5e;
-            border-radius: 6px;
-            background: #2a2a4e;
-            color: #ccc;
-            font-size: 0.7rem;
-            font-family: monospace;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .key-btn:active {
-            background: #5a5a8e;
-        }
-        .bar-btn {
-            width: 40px;
-            height: 40px;
-            border: none;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            flex-shrink: 0;
-        }
-        #mic-btn {
-            background: #7b6ba8;
-            color: #fff;
-            transition: background 0.2s;
-        }
-        #mic-btn.listening {
-            background: #2ecc71;
-        }
-        #mic-btn.recording {
-            background: #e04040;
-            animation: pulse 1s infinite;
-        }
-        #stop-btn {
-            background: #e04040;
-            color: #fff;
-            display: none;
-        }
-        #speak-toggle {
-            background: #2a2a4e;
-            font-size: 1.1rem;
-        }
-        #stt-toggle {
-            background: #2a2a4e;
-            color: #ccc;
-            font-size: 0.6rem;
-            font-weight: bold;
-            width: 40px;
-            height: 40px;
-        }
-        #auto-btn {
-            background: #2a2a4e;
-            color: #888;
-            font-size: 0.6rem;
-            font-weight: bold;
-            width: 40px;
-            height: 40px;
-            transition: background 0.2s;
-        }
-        #auto-btn.active {
-            background: #2ecc71;
-            color: #fff;
-        }
-        .fire-btn { transition: transform 0.2s; opacity: 0.6; border-radius: 50%; border: 1px solid #333 !important; background: #111122 !important; }
-        .fire-btn.active { opacity: 1; transform: scale(1.25); border: 1px solid #555 !important; }
-        .fire-btn svg { animation: flame-glow 2s ease-in-out infinite; }
-        @keyframes flame-glow { 0%,100%{opacity:1} 50%{opacity:0.7} }
-        .fire-blue svg { filter: drop-shadow(0 0 2px #00bfff) drop-shadow(0 0 6px #00bfff) drop-shadow(0 0 10px #0080ff); }
-        .fire-green svg { filter: drop-shadow(0 0 2px #39ff14) drop-shadow(0 0 6px #39ff14) drop-shadow(0 0 10px #00cc00); }
-        .fire-yellow svg { filter: drop-shadow(0 0 2px #ffff00) drop-shadow(0 0 6px #ffdd00) drop-shadow(0 0 10px #ffaa00); }
-        .fire-red svg { filter: drop-shadow(0 0 2px #ff4444) drop-shadow(0 0 6px #ff2200) drop-shadow(0 0 10px #cc0000); }
-        .fire-purple svg { filter: drop-shadow(0 0 2px #bf5fff) drop-shadow(0 0 6px #9933ff) drop-shadow(0 0 10px #7700cc); }
-        .fire-orange svg { filter: drop-shadow(0 0 2px #ff8800) drop-shadow(0 0 6px #ff6600) drop-shadow(0 0 10px #cc4400); }
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-        }
-    </style>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
@@ -162,12 +29,12 @@
         <button class="key-btn" onclick="sendKey('Right')">&#9654;</button>
     </div>
     <div class="key-row" style="justify-content: center; gap: 0.5rem;">
-        <button id="stop-btn" class="bar-btn" onclick="stopSpeaking()" style="width:34px;height:34px;">
+        <button id="stop-btn" class="bar-btn bar-btn--sm" onclick="stopSpeaking()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <rect x="4" y="4" width="16" height="16" rx="2"></rect>
             </svg>
         </button>
-        <button id="mic-btn" class="bar-btn" onclick="toggleListening()" style="width:34px;height:34px;">
+        <button id="mic-btn" class="bar-btn bar-btn--sm" onclick="toggleListening()">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
                 <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
@@ -175,16 +42,16 @@
                 <line x1="8" y1="23" x2="16" y2="23"></line>
             </svg>
         </button>
-        <button id="speak-toggle" class="bar-btn" onclick="toggleSpeak()" style="width:34px;height:34px;font-size:0.9rem;">
+        <button id="speak-toggle" class="bar-btn bar-btn--sm" onclick="toggleSpeak()">
             <span id="speak-icon">🔇</span>
         </button>
         <span style="width:8px;"></span>
-        <button class="bar-btn fire-btn fire-blue" onclick="switchSession('dev')" style="width:30px;height:30px;background:none;border:none;" id="fire-dev" title="Dev"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gb" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#0044ff"/><stop offset="100%" stop-color="#00ddff"/></linearGradient></defs><path fill="url(#gb)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
-        <button class="bar-btn fire-btn fire-green" onclick="switchSession('nimbus')" style="width:30px;height:30px;background:none;border:none;" id="fire-nimbus" title="Nimbus"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gn" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#006600"/><stop offset="100%" stop-color="#39ff14"/></linearGradient></defs><path fill="url(#gn)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
-        <button class="bar-btn fire-btn fire-yellow" onclick="switchSession('alpha')" style="width:30px;height:30px;background:none;border:none;" id="fire-alpha" title="Alpha"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gy" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#cc8800"/><stop offset="100%" stop-color="#ffff00"/></linearGradient></defs><path fill="url(#gy)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
-        <button class="bar-btn fire-btn fire-red" onclick="switchSession('bravo')" style="width:30px;height:30px;background:none;border:none;" id="fire-bravo" title="Bravo"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gr" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#990000"/><stop offset="100%" stop-color="#ff4444"/></linearGradient></defs><path fill="url(#gr)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
-        <button class="bar-btn fire-btn fire-purple" onclick="switchSession('charlie')" style="width:30px;height:30px;background:none;border:none;" id="fire-charlie" title="Charlie"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gp" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#4400aa"/><stop offset="100%" stop-color="#bf5fff"/></linearGradient></defs><path fill="url(#gp)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
-        <button class="bar-btn fire-btn fire-orange" onclick="switchSession('delta')" style="width:30px;height:30px;background:none;border:none;" id="fire-delta" title="Delta"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="go" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#993300"/><stop offset="100%" stop-color="#ff8800"/></linearGradient></defs><path fill="url(#go)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="bar-btn fire-btn fire-blue" onclick="switchSession('dev')" id="fire-dev" title="Dev"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gb" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#0044ff"/><stop offset="100%" stop-color="#00ddff"/></linearGradient></defs><path fill="url(#gb)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="bar-btn fire-btn fire-green" onclick="switchSession('nimbus')" id="fire-nimbus" title="Nimbus"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gn" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#006600"/><stop offset="100%" stop-color="#39ff14"/></linearGradient></defs><path fill="url(#gn)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="bar-btn fire-btn fire-yellow" onclick="switchSession('alpha')" id="fire-alpha" title="Alpha"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gy" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#cc8800"/><stop offset="100%" stop-color="#ffff00"/></linearGradient></defs><path fill="url(#gy)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="bar-btn fire-btn fire-red" onclick="switchSession('bravo')" id="fire-bravo" title="Bravo"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gr" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#990000"/><stop offset="100%" stop-color="#ff4444"/></linearGradient></defs><path fill="url(#gr)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="bar-btn fire-btn fire-purple" onclick="switchSession('charlie')" id="fire-charlie" title="Charlie"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gp" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#4400aa"/><stop offset="100%" stop-color="#bf5fff"/></linearGradient></defs><path fill="url(#gp)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="bar-btn fire-btn fire-orange" onclick="switchSession('delta')" id="fire-delta" title="Delta"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="go" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#993300"/><stop offset="100%" stop-color="#ff8800"/></linearGradient></defs><path fill="url(#go)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
     </div>
     <div style="height: 68px;"></div>
 </div>

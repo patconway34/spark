@@ -141,7 +141,7 @@
 </head>
 <body>
 
-<iframe id="terminal" src="{{ session.terminal_url or 'https://terminal.tradingdata.net' }}"></iframe>
+<iframe id="terminal" src="{{ session.terminal_url }}"></iframe>
 
 <div id="status-bar">Tap mic to start listening</div>
 
@@ -219,7 +219,6 @@ let processing = false;    // prevent overlapping keyword checks
 
 const VOLUME_THRESHOLD = 10;
 const SILENCE_AFTER_SPEECH_MS = 2000;  // silence needed to trigger keyword check
-const CLIP_DURATION_MS = 3000;         // rolling clip length
 
 function sparkLog(msg) {
     fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({msg})}).catch(()=>{});

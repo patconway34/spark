@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
     <title>Spark</title>
     <style>
         :root {
@@ -19,12 +19,23 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            overscroll-behavior: contain;
         }
         #terminal {
-            flex: 1;
             border: none;
             border-top: 2px solid var(--flame-mid);
             width: 100%;
+            height: 100%;
+        }
+        #touch-overlay {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 10;
+            touch-action: none;
+        }
+        @media (pointer: coarse) {
+            #touch-overlay { display: block; }
         }
         #status-bar {
             padding: 0.3rem 0.75rem;
@@ -141,7 +152,10 @@
 </head>
 <body>
 
-<iframe id="terminal" src="{{ session.terminal_url or 'https://terminal.tradingdata.net' }}"></iframe>
+<div id="terminal-wrap" style="flex:1;position:relative;overflow:hidden;">
+    <iframe id="terminal" src="{{ session.terminal_url or 'https://terminal.tradingdata.net' }}" style="flex:none;width:100%;height:100%;"></iframe>
+    <div id="touch-overlay"></div>
+</div>
 
 <div id="status-bar">Tap mic to start listening</div>
 
@@ -150,16 +164,20 @@
         <button class="key-btn" onclick="sendKey('Escape')">Esc</button>
         <button class="key-btn" onclick="sendKey('Tab')">Tab</button>
         <button class="key-btn" onclick="sendKey('BTab')">⇧Tab</button>
-        <button class="key-btn" onclick="sendKey('Enter')">Enter</button>
         <button class="key-btn" onclick="sendKey('C-z')">^Z</button>
         <button class="key-btn" onclick="sendKey('C-c')">^C</button>
         <button class="key-btn" onclick="sendKey('C-v')">^V</button>
+        <button class="key-btn" onclick="sendKey('Enter')">Enter</button>
     </div>
     <div class="key-row">
+        <button class="key-btn" onclick="sendSlashNew()" style="font-size:0.7rem;font-weight:600;letter-spacing:-0.5px;">/new</button>
         <button class="key-btn" onclick="sendKey('Up')">&#9650;</button>
         <button class="key-btn" onclick="sendKey('Down')">&#9660;</button>
         <button class="key-btn" onclick="sendKey('Left')">&#9664;</button>
         <button class="key-btn" onclick="sendKey('Right')">&#9654;</button>
+        <span style="width:6px;"></span>
+        <button class="key-btn" onclick="sendKey('PPage')" style="font-size:0.55rem;">PgUp</button>
+        <button class="key-btn" onclick="sendKey('NPage')" style="font-size:0.55rem;">PgDn</button>
     </div>
     <div class="key-row" style="justify-content: center; gap: 0.5rem;">
         <button id="stop-btn" class="bar-btn" onclick="stopSpeaking()" style="width:34px;height:34px;">
@@ -230,6 +248,14 @@ function sendKey(key) {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({key: key}),
+    });
+}
+
+function sendSlashNew() {
+    fetch('/api/voice-text', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: '/new'}),
     });
 }
 
@@ -749,6 +775,57 @@ window.addEventListener('load', async () => {
     highlightActiveSession();
     setTimeout(toggleListening, 500);
 });
+
+// --- Touch scroll overlay (mobile only) ---
+(function() {
+    const overlay = document.getElementById('touch-overlay');
+    if (!overlay) return;
+    let startY = 0;
+    let lastY = 0;
+    let scrollPending = false;
+    const LINE_PX = 30;  // pixels per scroll line
+
+    overlay.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+            startY = e.touches[0].clientY;
+            lastY = startY;
+        } else {
+            // Multi-touch (pinch) — let it through to the page
+            overlay.style.pointerEvents = 'none';
+            setTimeout(() => { overlay.style.pointerEvents = ''; }, 300);
+        }
+    }, {passive: true});
+
+    overlay.addEventListener('touchmove', (e) => {
+        if (e.touches.length !== 1 || scrollPending) return;
+        const y = e.touches[0].clientY;
+        const delta = lastY - y;  // positive = finger moved up = scroll up
+        const lines = Math.floor(Math.abs(delta) / LINE_PX);
+        if (lines >= 1) {
+            lastY = y;
+            scrollPending = true;
+            fetch('/api/scroll', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({lines, direction: delta > 0 ? 'up' : 'down'}),
+            }).finally(() => { scrollPending = false; });
+        }
+    }, {passive: true});
+
+    // Double-tap to exit tmux copy-mode
+    let lastTap = 0;
+    overlay.addEventListener('touchend', (e) => {
+        const now = Date.now();
+        if (now - lastTap < 300) {
+            fetch('/api/key', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({key: 'q'}),
+            });
+        }
+        lastTap = now;
+    });
+})();
 </script>
 </body>
 </html>

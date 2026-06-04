@@ -442,6 +442,22 @@ def key():
     return jsonify({"ok": True})
 
 
+@app.route("/api/scroll", methods=["POST"])
+def scroll():
+    """Scroll the tmux pane using copy-mode."""
+    data = request.get_json()
+    lines = max(1, min(50, int(data.get("lines", 3))))
+    direction = data.get("direction", "up")  # "up" or "down"
+    tmux = get_session()["tmux"]
+    # Enter copy-mode if not already in it, then scroll
+    if direction == "up":
+        cmd = f"tmux copy-mode -t {tmux} 2>/dev/null; tmux send-keys -t {tmux} -X scroll-up 2>/dev/null; " * lines
+    else:
+        cmd = f"tmux send-keys -t {tmux} -X scroll-down 2>/dev/null; " * lines
+    subprocess.run(["wsl", "bash", "-c", cmd + "true"], capture_output=True, timeout=5)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/retry", methods=["POST"])
 def retry():
     """Resend the last transcribed text."""

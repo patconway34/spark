@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, make_response, render_template, request, send_file
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
@@ -26,8 +26,12 @@ app = Flask(__name__)
 # File logger so we can diagnose from WSL
 _SPARK_DIR = Path(__file__).resolve().parent
 LOG_FILE = _SPARK_DIR / "spark.log"
-logging.basicConfig(filename=str(LOG_FILE), level=logging.INFO,
-                    format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(message)s", datefmt="%H:%M:%S",
+                    handlers=[
+                        logging.FileHandler(str(LOG_FILE)),
+                        logging.StreamHandler(),
+                    ])
 PORT = 5023
 HOST = "0.0.0.0"
 
@@ -374,14 +378,14 @@ def send_to_claude(text):
     if key:
         result = subprocess.run(
             ["wsl", "bash", "-c", f"tmux send-keys -t {tmux} {key}"],
-            capture_output=True, timeout=5,
+            capture_output=True, timeout=15,
         )
         logging.info(f"KEY cmd='{cmd}' session={tmux} rc={result.returncode} err={result.stderr.decode().strip()}")
     else:
         escaped = text.replace("'", "'\\''")
         result = subprocess.run(
             ["wsl", "bash", "-c", f"tmux send-keys -t {tmux} '{escaped}' Enter"],
-            capture_output=True, timeout=5,
+            capture_output=True, timeout=15,
         )
         logging.info(f"SEND text='{text[:80]}' session={tmux} rc={result.returncode} err={result.stderr.decode().strip()}")
 
@@ -389,7 +393,9 @@ def send_to_claude(text):
 @app.route("/")
 @app.route("/chat")
 def index():
-    return render_template("chat.html", session=_active_session)
+    resp = make_response(render_template("chat.html", session=_active_session))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
 
 
 @app.route("/api/sessions")
@@ -437,24 +443,23 @@ def key():
     tmux = get_session()["tmux"]
     subprocess.run(
         ["wsl", "bash", "-c", f"tmux send-keys -t {tmux} {k}"],
-        capture_output=True, timeout=5,
+        capture_output=True, timeout=15,
     )
     return jsonify({"ok": True})
 
 
 @app.route("/api/scroll", methods=["POST"])
 def scroll():
-    """Scroll the tmux pane using copy-mode."""
+    """Scroll the tmux pane using copy-mode (page-up / page-down)."""
     data = request.get_json()
-    lines = max(1, min(50, int(data.get("lines", 3))))
     direction = data.get("direction", "up")  # "up" or "down"
     tmux = get_session()["tmux"]
-    # Enter copy-mode if not already in it, then scroll
     if direction == "up":
-        cmd = f"tmux copy-mode -t {tmux} 2>/dev/null; tmux send-keys -t {tmux} -X scroll-up 2>/dev/null; " * lines
+        cmd = f"tmux copy-mode -t {tmux} 2>/dev/null; tmux send-keys -t {tmux} -X page-up 2>/dev/null"
     else:
-        cmd = f"tmux send-keys -t {tmux} -X scroll-down 2>/dev/null; " * lines
-    subprocess.run(["wsl", "bash", "-c", cmd + "true"], capture_output=True, timeout=5)
+        # page-down, then cancel copy-mode if we've reached the bottom
+        cmd = f"tmux send-keys -t {tmux} -X page-down 2>/dev/null; tmux send-keys -t {tmux} -X cancel 2>/dev/null"
+    subprocess.run(["wsl", "bash", "-c", cmd], capture_output=True, timeout=15)
     return jsonify({"ok": True})
 
 
@@ -539,7 +544,7 @@ def screen():
     try:
         result = subprocess.run(
             ["wsl", "bash", "-c", f"tmux capture-pane -t {get_session()['tmux']} -p"],
-            capture_output=True, timeout=5, text=True,
+            capture_output=True, timeout=15, text=True,
         )
         text = result.stdout.strip()
         # Look for permission/question prompts
@@ -594,7 +599,7 @@ def _capture_pane():
     try:
         result = subprocess.run(
             ["wsl", "tmux", "capture-pane", "-t", tmux, "-p"],
-            capture_output=True, timeout=5, encoding="utf-8", errors="replace",
+            capture_output=True, timeout=15, encoding="utf-8", errors="replace",
         )
         return (result.stdout or "") if result.returncode == 0 else ""
     except Exception:
@@ -856,6 +861,6 @@ def test_page():
 
 
 if __name__ == "__main__":
-    logging.info(f"[Spark] Voice layer on port {PORT}")
-    logging.info(f"[Spark] tmux session: {TMUX_SESSION}")
-    app.run(host=HOST, port=PORT, debug=True)
+    print(f"[Spark] Voice layer on port {PORT}")
+    print(f"[Spark] tmux session: {TMUX_SESSION}")
+    app.run(host=HOST, port=PORT, debug=False)

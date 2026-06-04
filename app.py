@@ -6,6 +6,7 @@ and voice output (gTTS from transcript JSONL).
 
 import json
 import logging
+import os
 import subprocess
 from datetime import datetime
 import sys
@@ -457,8 +458,7 @@ def scroll():
     if direction == "up":
         cmd = f"tmux copy-mode -t {tmux} 2>/dev/null; tmux send-keys -t {tmux} -X page-up 2>/dev/null"
     else:
-        # page-down, then cancel copy-mode if we've reached the bottom
-        cmd = f"tmux send-keys -t {tmux} -X page-down 2>/dev/null; tmux send-keys -t {tmux} -X cancel 2>/dev/null"
+        cmd = f"tmux send-keys -t {tmux} -X cancel 2>/dev/null"
     subprocess.run(["wsl", "bash", "-c", cmd], capture_output=True, timeout=15)
     return jsonify({"ok": True})
 
@@ -860,7 +860,26 @@ def test_page():
     </script></body></html>"""
 
 
+def _kill_port(port):
+    """Kill whatever is holding the port so we can restart cleanly."""
+    try:
+        out = subprocess.check_output(
+            ["powershell", "-Command",
+             f"(Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue).OwningProcess"],
+            text=True, timeout=5,
+        ).strip()
+        for pid in set(out.splitlines()):
+            pid = pid.strip()
+            if pid and pid.isdigit() and int(pid) != os.getpid():
+                subprocess.run(["taskkill", "/F", "/PID", pid, "/T"],
+                               capture_output=True, timeout=5)
+                print(f"[Spark] Killed old process on port {port} (PID {pid})")
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
+    _kill_port(PORT)
     print(f"[Spark] Voice layer on port {PORT}")
     print(f"[Spark] tmux session: {TMUX_SESSION}")
     app.run(host=HOST, port=PORT, debug=False)

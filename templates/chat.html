@@ -236,6 +236,7 @@ function scrollTerminal(direction) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({direction}),
     });
+    window.scrollTo(0, 0);
 }
 
 function sendKey(key) {

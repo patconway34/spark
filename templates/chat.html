@@ -256,6 +256,7 @@ let analyser = null;
 let volumeInterval = null;
 let processing = false;    // prevent overlapping keyword checks
 let wasTalking = false;    // true when volume was above threshold
+let clipHadSpeech = false; // true if current clip had any speech above threshold
 let silenceTimer = null;   // fires after sustained silence
 
 const VOLUME_THRESHOLD = 10;
@@ -402,6 +403,7 @@ function startNewClip() {
     }
     if (!audioStream) return;
     clipChunks = [];
+    clipHadSpeech = false;
     const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
     clipRecorder = new MediaRecorder(audioStream, {mimeType});
     clipRecorder.ondataavailable = (e) => { if (e.data.size > 0) clipChunks.push(e.data); };
@@ -428,6 +430,7 @@ async function startVolumeMonitor() {
             document.getElementById('mic-btn').classList.add('recording');
             setStatus('🎙 ' + Math.round(avg) + ' dB');
             wasTalking = true;
+            clipHadSpeech = true;
             // Cancel any pending silence check — still talking
             if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
         } else {
@@ -522,6 +525,14 @@ function getCommandTargets() {
 async function checkClipForKeyword() {
     if (processing) return;
     processing = true;
+
+    // Only process if there was actual speech in this clip
+    if (!clipHadSpeech) {
+        sparkLog('CLIP: no speech detected, skipping');
+        processing = false;
+        if (listening) startNewClip();
+        return;
+    }
 
     // Stop current clip to collect audio
     if (clipRecorder && clipRecorder.state === 'recording') {

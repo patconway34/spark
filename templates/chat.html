@@ -252,10 +252,11 @@ let volumeInterval = null;
 let processing = false;    // prevent overlapping keyword checks
 let wasTalking = false;    // true when volume was above threshold
 let clipHadSpeech = false; // true if current clip had any speech above threshold
-let silenceTimer = null;   // fires after sustained silence
+let silenceTimer = null;   // fires every 1s during silence
+let silenceCommas = 0;     // counts seconds of silence
 
 const VOLUME_THRESHOLD = 20;
-const SILENCE_DELAY_MS = 2000;  // wait 2s of silence before checking clip
+const SILENCE_SECONDS = 2;  // seconds of silence before checking clip
 
 function sparkLog(msg) {
     fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({msg})}).catch(()=>{});
@@ -427,18 +428,25 @@ async function startVolumeMonitor() {
             wasTalking = true;
             clipHadSpeech = true;
             // Cancel any pending silence check — still talking
-            if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+            if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; silenceCommas = 0; }
         } else {
             document.getElementById('mic-btn').classList.remove('recording');
             if (listening) document.getElementById('mic-btn').classList.add('listening');
-            // If we were talking and now silent, start silence timer
+            // If we were talking and now silent, start counting silence
             if (wasTalking && !silenceTimer) {
-                silenceTimer = setTimeout(() => {
-                    silenceTimer = null;
-                    wasTalking = false;
-                    sparkLog('SILENCE -> checking clip for keyword');
-                    checkClipForKeyword();
-                }, SILENCE_DELAY_MS);
+                silenceCommas = 0;
+                silenceTimer = setInterval(() => {
+                    silenceCommas++;
+                    sparkLog('SILENCE_TICK: ' + ','.repeat(silenceCommas));
+                    setStatus('Silence ' + ','.repeat(silenceCommas));
+                    if (silenceCommas >= SILENCE_SECONDS) {
+                        clearInterval(silenceTimer);
+                        silenceTimer = null;
+                        wasTalking = false;
+                        sparkLog('SILENCE -> checking clip for keyword');
+                        checkClipForKeyword();
+                    }
+                }, 1000);
             }
         }
     }, 100);
@@ -459,8 +467,9 @@ function startKeywordScanner() {
 }
 
 function stopKeywordScanner() {
-    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+    if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
     wasTalking = false;
+    silenceCommas = 0;
 }
 
 // --- Score how well two strings match (0-1, higher = better) ---

@@ -639,66 +639,30 @@ async function checkClipForKeyword() {
     if (listening) startNewClip();
 }
 
-// --- Send full recording to Groq and then to tmux ---
+// --- Send accumulated transcript (with pauses) to tmux ---
 async function sendFullRecording() {
-    document.getElementById('mic-btn').classList.add('recording');
+    // Build text from accumulated transcript parts (already has commas for pauses)
+    let text = transcriptParts.join(' ').trim();
 
-    // Stop main recorder to collect audio
-    if (mainRecorder && mainRecorder.state === 'recording') {
-        await new Promise(resolve => {
-            mainRecorder.onstop = resolve;
-            mainRecorder.stop();
-        });
-    }
+    // Strip "now" and trailing commas/punctuation from the end
+    text = text.replace(/[,.\s]*now[,.\s?]*$/i, '').trim();
+    // Clean up any trailing commas
+    text = text.replace(/[,\s]+$/, '').trim();
 
-    if (mainChunks.length === 0) {
-        sparkLog('FULL: no chunks');
-        if (listening) startMainRecorder();
-        document.getElementById('mic-btn').classList.remove('recording');
-        if (listening) document.getElementById('mic-btn').classList.add('listening');
-        return;
-    }
-
-    const mimeType = mainRecorder ? mainRecorder.mimeType : 'audio/webm';
-    const ext = mimeType.includes('webm') ? 'webm' : 'm4a';
-    const blob = new Blob(mainChunks, {type: mimeType});
-    sparkLog('FULL: sending ' + blob.size + ' bytes');
-    setStatus('Transcribing full recording...');
-
-    const formData = new FormData();
-    formData.append('audio', blob, `recording.${ext}`);
-
-    try {
-        const res = await fetch('/api/transcribe', {method: 'POST', body: formData});
-        const data = await res.json();
-        if (data.error) {
-            setStatus('Groq error: ' + data.error);
-            sparkLog('FULL_ERROR: ' + data.error);
-        } else if (data.text) {
-            // Strip "now" from the end
-            let text = data.text.trim();
-            const words = text.split(/\s+/);
-            const lastOne = words.length > 0 ? words[words.length - 1].toLowerCase().replace(/[^a-z]/g, '') : '';
-            if (lastOne === 'now') { words.pop(); }
-            text = words.join(' ').trim();
-            if (text) {
-                setStatus('Sent: ' + text);
-                sparkLog('FULL_SEND: ' + text.substring(0, 80));
-                sendText(text);
-            } else {
-                setStatus('Nothing to send after stripping trigger');
-            }
-        }
-    } catch (e) {
-        setStatus('Groq failed: ' + e.message);
-        sparkLog('FULL_FETCH_ERROR: ' + e.message);
+    if (text) {
+        setStatus('Sent: ' + text);
+        sparkLog('FULL_SEND: ' + text.substring(0, 200));
+        sendText(text);
+    } else {
+        setStatus('Nothing to send after stripping trigger');
     }
 
     // Start fresh
     mainChunks = [];
+    if (mainRecorder && mainRecorder.state === 'recording') {
+        try { mainRecorder.stop(); } catch(e) {}
+    }
     if (listening) startMainRecorder();
-    document.getElementById('mic-btn').classList.remove('recording');
-    if (listening) document.getElementById('mic-btn').classList.add('listening');
 }
 
 async function sendText(text) {

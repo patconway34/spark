@@ -589,12 +589,15 @@ async function checkClipForKeyword() {
             transcriptParts.push(commaPrefix + heard);
             sparkLog('CLIP_HEARD: ' + transcriptParts.join(' '));
 
-            // Check if last word is "now"
+            // Check if "now" appears in the last 3 words
             const words = heard.replace(/[^a-z ]/g, '').trim().split(/\s+/);
-            const lastWord = words[words.length - 1];
+            const lastThree = words.slice(-3);
+            const nowIdx = lastThree.lastIndexOf('now');
 
-            if (lastWord === 'now') {
-                const before = words.slice(0, -1).join(' ').trim();
+            if (nowIdx !== -1) {
+                // Strip "now" and anything after it
+                const cutAt = words.length - (lastThree.length - nowIdx);
+                const before = words.slice(0, cutAt).join(' ').trim();
                 sparkLog('NOW prefix: "' + before + '"');
 
                 // Only try command matching on short phrases (1-3 words)

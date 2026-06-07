@@ -567,7 +567,8 @@ async function checkClipForKeyword() {
         const data = await res.json();
         if (data.text) {
             const heard = data.text.trim().toLowerCase();
-            sparkLog('CLIP_HEARD: ' + heard);
+            const silenceSuffix = silenceCommas > 0 ? ' ' + ', '.repeat(silenceCommas).trim() : '';
+            sparkLog('CLIP_HEARD: ' + heard + silenceSuffix);
 
             // Check if last word is "now"
             const words = heard.replace(/[^a-z ]/g, '').trim().split(/\s+/);

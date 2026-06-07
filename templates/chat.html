@@ -542,34 +542,39 @@ async function checkClipForKeyword() {
             const heard = data.text.trim().toLowerCase();
             sparkLog('CLIP_HEARD: ' + heard);
 
-            // First, check if the entire clip is a voice command (no "go ahead" needed)
-            const cleanHeard = heard.replace(/[^a-z ]/g, '').trim();
-            const targets = getCommandTargets();
-            let bestScore = 0, bestTarget = null;
-            for (const t of targets) {
-                for (const n of t.names) {
-                    const s = score(cleanHeard, n);
-                    if (s > bestScore) { bestScore = s; bestTarget = t; }
-                }
-            }
-
-            if (bestTarget && bestScore >= 0.7) {
-                // Voice command — execute immediately, no "go ahead" needed
-                sparkLog('CMD_AUTO: "' + cleanHeard + '" -> ' + bestTarget.label + ' (score=' + bestScore.toFixed(2) + ')');
-                setStatus(bestTarget.label);
-                bestTarget.act();
-                processing = false;
-                if (listening) startNewClip();
-                return;
-            }
-
             if (heard.includes('go ahead')) {
-                // No command match — full transcription
+                // Extract what comes before "go ahead"
+                const before = heard.split('go ahead')[0].trim().replace(/[^a-z ]/g, '');
+                sparkLog('GO_AHEAD prefix: "' + before + '"');
+
+                if (before) {
+                    // Check if the prefix matches a voice command
+                    const targets = getCommandTargets();
+                    let bestScore = 0, bestTarget = null;
+                    for (const t of targets) {
+                        for (const n of t.names) {
+                            const s = score(before, n);
+                            if (s > bestScore) { bestScore = s; bestTarget = t; }
+                        }
+                    }
+
+                    if (bestTarget && bestScore >= 0.5) {
+                        // Short command: "enter go ahead", "tab go ahead", etc.
+                        sparkLog('CMD_MATCH: "' + before + '" -> ' + bestTarget.label + ' (score=' + bestScore.toFixed(2) + ')');
+                        setStatus(bestTarget.label);
+                        bestTarget.act();
+                        processing = false;
+                        if (listening) startNewClip();
+                        return;
+                    }
+                }
+
+                // Long text or no command match — full transcription
                 sparkLog('CLIP_MATCH: go ahead -> full transcribe');
                 setStatus('GO AHEAD! Transcribing full recording...');
                 await sendFullRecording();
             }
-            // No "go ahead" and not a command — just keep listening
+            // No "go ahead" found — just keep listening, no action
         }
     } catch (e) {
         sparkLog('CLIP_ERROR: ' + e.message);

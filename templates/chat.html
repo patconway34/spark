@@ -321,7 +321,7 @@ function stopSpeaking() {
     }
     isSpeaking = false;
     document.getElementById('stop-btn').style.display = 'none';
-    setStatus(listening ? 'Recording... say "go ahead" to send' : 'Stopped');
+    setStatus(listening ? 'Recording... say "now" to send' : 'Stopped');
 }
 
 // --- Mic toggle ---
@@ -344,7 +344,7 @@ async function startListening() {
         startKeywordScanner();
         listening = true;
         document.getElementById('mic-btn').classList.add('listening');
-        setStatus('Recording... say "go ahead" to send');
+        setStatus('Recording... say "now" to send');
         sparkLog('MIC_ON');
     } catch (e) {
         setStatus('Mic access denied');
@@ -506,7 +506,7 @@ function getCommandTargets() {
     ];
 }
 
-// --- Check the short clip for "go ahead" ---
+// --- Check the short clip for "now" keyword ---
 async function checkClipForKeyword() {
     if (processing) return;
     processing = true;
@@ -542,10 +542,13 @@ async function checkClipForKeyword() {
             const heard = data.text.trim().toLowerCase();
             sparkLog('CLIP_HEARD: ' + heard);
 
-            if (heard.includes('go ahead')) {
-                // Extract what comes before "go ahead"
-                const before = heard.split('go ahead')[0].trim().replace(/[^a-z ]/g, '');
-                sparkLog('GO_AHEAD prefix: "' + before + '"');
+            // Check if last word is "now"
+            const words = heard.replace(/[^a-z ]/g, '').trim().split(/\s+/);
+            const lastWord = words[words.length - 1];
+
+            if (lastWord === 'now') {
+                const before = words.slice(0, -1).join(' ').trim();
+                sparkLog('NOW prefix: "' + before + '"');
 
                 if (before) {
                     // Check if the prefix matches a voice command
@@ -559,7 +562,7 @@ async function checkClipForKeyword() {
                     }
 
                     if (bestTarget && bestScore >= 0.5) {
-                        // Short command: "enter go ahead", "tab go ahead", etc.
+                        // Short command: "enter now", "tab now", etc.
                         sparkLog('CMD_MATCH: "' + before + '" -> ' + bestTarget.label + ' (score=' + bestScore.toFixed(2) + ')');
                         setStatus(bestTarget.label);
                         bestTarget.act();
@@ -570,11 +573,11 @@ async function checkClipForKeyword() {
                 }
 
                 // Long text or no command match — full transcription
-                sparkLog('CLIP_MATCH: go ahead -> full transcribe');
-                setStatus('GO AHEAD! Transcribing full recording...');
+                sparkLog('CLIP_MATCH: now -> full transcribe');
+                setStatus('NOW! Transcribing full recording...');
                 await sendFullRecording();
             }
-            // No "go ahead" found — just keep listening, no action
+            // No "now" found — just keep listening, no action
         }
     } catch (e) {
         sparkLog('CLIP_ERROR: ' + e.message);
@@ -621,13 +624,11 @@ async function sendFullRecording() {
             setStatus('Groq error: ' + data.error);
             sparkLog('FULL_ERROR: ' + data.error);
         } else if (data.text) {
-            // Strip "go ahead" from the end
+            // Strip "now" from the end
             let text = data.text.trim();
             const words = text.split(/\s+/);
-            const lastTwo = words.slice(-2).map(w => w.toLowerCase().replace(/[^a-z]/g, '')).join(' ');
-            if (lastTwo === 'go ahead') { words.pop(); words.pop(); }
             const lastOne = words.length > 0 ? words[words.length - 1].toLowerCase().replace(/[^a-z]/g, '') : '';
-            if (lastOne === 'ahead' || lastOne === 'go') { words.pop(); }
+            if (lastOne === 'now') { words.pop(); }
             text = words.join(' ').trim();
             if (text) {
                 setStatus('Sent: ' + text);
@@ -731,7 +732,7 @@ async function pollTranscript() {
                     isSpeaking = false;
                     currentAudio = null;
                     document.getElementById('stop-btn').style.display = 'none';
-                    setStatus(listening ? 'Listening... say "go ahead" to submit' : 'Ready');
+                    setStatus(listening ? 'Listening... say "now" to submit' : 'Ready');
                 };
                 currentAudio.play();
                 setStatus('Speaking: ' + data.text.substring(0, 80));

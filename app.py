@@ -7,6 +7,7 @@ and voice output (gTTS from transcript JSONL).
 import json
 import logging
 import os
+import signal
 import subprocess
 from datetime import datetime
 import sys
@@ -15,7 +16,7 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, make_response, render_template, request, send_file
+from flask import Flask, jsonify, make_response, redirect, render_template, request, send_file
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
@@ -399,6 +400,11 @@ def index():
     return resp
 
 
+@app.route("/blink")
+def blink():
+    return redirect("https://blink.tradingdata.net")
+
+
 @app.route("/api/sessions")
 def api_sessions():
     return jsonify({"sessions": SESSIONS, "active": _active_session["id"]})
@@ -458,7 +464,8 @@ def scroll():
     if direction == "up":
         cmd = f"tmux copy-mode -t {tmux} 2>/dev/null; tmux send-keys -t {tmux} -X page-up 2>/dev/null"
     else:
-        cmd = f"tmux send-keys -t {tmux} -X cancel 2>/dev/null"
+        # Jump to bottom of history and exit copy-mode so we're back at the live input
+        cmd = f"tmux send-keys -t {tmux} -X history-bottom 2>/dev/null; tmux send-keys -t {tmux} -X cancel 2>/dev/null"
     subprocess.run(["wsl", "bash", "-c", cmd], capture_output=True, timeout=15)
     return jsonify({"ok": True})
 
@@ -878,7 +885,18 @@ def _kill_port(port):
         pass
 
 
+_ctrl_c_count = 0
+
+def _handle_sigint(sig, frame):
+    global _ctrl_c_count
+    _ctrl_c_count += 1
+    if _ctrl_c_count >= 2:
+        print("\n[Spark] Force quit.")
+        os._exit(1)
+    print("\n[Spark] Ctrl+C again to force quit.")
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, _handle_sigint)
     _kill_port(PORT)
     print(f"[Spark] Voice layer on port {PORT}")
     print(f"[Spark] tmux session: {TMUX_SESSION}")

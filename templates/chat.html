@@ -124,16 +124,27 @@
             background: #2ecc71;
             color: #fff;
         }
-        .fire-btn { transition: transform 0.2s; opacity: 0.6; border-radius: 50%; border: 1px solid #333 !important; background: #111122 !important; }
-        .fire-btn.active { opacity: 1; transform: scale(1.25); border: 1px solid #555 !important; }
-        .fire-btn svg { animation: flame-glow 2s ease-in-out infinite; }
-        @keyframes flame-glow { 0%,100%{opacity:1} 50%{opacity:0.7} }
-        .fire-blue svg { filter: drop-shadow(0 0 2px #00bfff) drop-shadow(0 0 6px #00bfff) drop-shadow(0 0 10px #0080ff); }
-        .fire-green svg { filter: drop-shadow(0 0 2px #39ff14) drop-shadow(0 0 6px #39ff14) drop-shadow(0 0 10px #00cc00); }
-        .fire-yellow svg { filter: drop-shadow(0 0 2px #ffff00) drop-shadow(0 0 6px #ffdd00) drop-shadow(0 0 10px #ffaa00); }
-        .fire-red svg { filter: drop-shadow(0 0 2px #ff4444) drop-shadow(0 0 6px #ff2200) drop-shadow(0 0 10px #cc0000); }
-        .fire-purple svg { filter: drop-shadow(0 0 2px #bf5fff) drop-shadow(0 0 6px #9933ff) drop-shadow(0 0 10px #7700cc); }
-        .fire-orange svg { filter: drop-shadow(0 0 2px #ff8800) drop-shadow(0 0 6px #ff6600) drop-shadow(0 0 10px #cc4400); }
+        .tab-btn {
+            height: 28px;
+            padding: 0 8px;
+            border: 1px solid #3a3a5e;
+            border-radius: 14px;
+            background: #2a2a4e;
+            color: #999;
+            font-size: 0.65rem;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        .tab-btn.active {
+            background: var(--flame);
+            color: #fff;
+            border-color: var(--flame);
+            font-weight: 600;
+        }
         @keyframes pulse {
             0%, 100% { transform: scale(1); }
             50% { transform: scale(1.1); }
@@ -183,13 +194,16 @@
         <button id="speak-toggle" class="bar-btn" onclick="toggleSpeak()" style="width:34px;height:34px;font-size:0.9rem;">
             <span id="speak-icon">🔇</span>
         </button>
+        <button id="blink-btn" class="bar-btn" onclick="toggleBlink()" style="width:34px;height:34px;" title="Blink">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </button>
         <span style="width:8px;"></span>
-        <button class="bar-btn fire-btn fire-blue" onclick="switchSession('dev')" style="width:30px;height:30px;background:none;border:none;" id="fire-dev" title="Dev"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gb" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#0044ff"/><stop offset="100%" stop-color="#00ddff"/></linearGradient></defs><path fill="url(#gb)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
-        <button class="bar-btn fire-btn fire-green" onclick="switchSession('nimbus')" style="width:30px;height:30px;background:none;border:none;" id="fire-nimbus" title="Nimbus"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gn" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#006600"/><stop offset="100%" stop-color="#39ff14"/></linearGradient></defs><path fill="url(#gn)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
-        <button class="bar-btn fire-btn fire-yellow" onclick="switchSession('alpha')" style="width:30px;height:30px;background:none;border:none;" id="fire-alpha" title="Alpha"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gy" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#cc8800"/><stop offset="100%" stop-color="#ffff00"/></linearGradient></defs><path fill="url(#gy)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
-        <button class="bar-btn fire-btn fire-red" onclick="switchSession('bravo')" style="width:30px;height:30px;background:none;border:none;" id="fire-bravo" title="Bravo"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gr" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#990000"/><stop offset="100%" stop-color="#ff4444"/></linearGradient></defs><path fill="url(#gr)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
-        <button class="bar-btn fire-btn fire-purple" onclick="switchSession('charlie')" style="width:30px;height:30px;background:none;border:none;" id="fire-charlie" title="Charlie"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="gp" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#4400aa"/><stop offset="100%" stop-color="#bf5fff"/></linearGradient></defs><path fill="url(#gp)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
-        <button class="bar-btn fire-btn fire-orange" onclick="switchSession('delta')" style="width:30px;height:30px;background:none;border:none;" id="fire-delta" title="Delta"><svg viewBox="0 0 16 16" width="20" height="20"><defs><linearGradient id="go" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#993300"/><stop offset="100%" stop-color="#ff8800"/></linearGradient></defs><path fill="url(#go)" d="M8 16c3.314 0 6-2 6-5.5 0-1.5-.5-4-2.5-6 .25 1.5-1.25 2-1.25 2C11 4 9 .5 6 0c.357 2 .5 4-2 6-1.25 1-2 2.729-2 4.5C2 14 4.686 16 8 16"/></svg></button>
+        <button class="tab-btn" onclick="switchSession('dev')" id="tab-dev">1</button>
+        <button class="tab-btn" onclick="switchSession('nimbus')" id="tab-nimbus">2</button>
+        <button class="tab-btn" onclick="switchSession('alpha')" id="tab-alpha">3</button>
+        <button class="tab-btn" onclick="switchSession('bravo')" id="tab-bravo">4</button>
+        <button class="tab-btn" onclick="switchSession('charlie')" id="tab-charlie">5</button>
+        <button class="tab-btn" onclick="switchSession('delta')" id="tab-delta">6</button>
     </div>
     <div style="height: 68px;"></div>
 </div>
@@ -199,6 +213,27 @@
 // Suppress "leave site" prompts
 window.onbeforeunload = null;
 window.addEventListener('beforeunload', (e) => { delete e.returnValue; });
+
+// --- Blink toggle ---
+let blinkActive = false;
+let terminalUrl = document.getElementById('terminal').src;
+
+function toggleBlink() {
+    const frame = document.getElementById('terminal');
+    const btn = document.getElementById('blink-btn');
+    if (blinkActive) {
+        frame.src = terminalUrl;
+        btn.style.background = '';
+        btn.style.color = '';
+        blinkActive = false;
+    } else {
+        terminalUrl = frame.src;
+        frame.src = 'https://blink.tradingdata.net';
+        btn.style.background = '#2563eb';
+        btn.style.color = '#fff';
+        blinkActive = true;
+    }
+}
 
 let listening = false;
 let speakEnabled = false;
@@ -213,18 +248,16 @@ let mainChunks = [];
 let clipRecorder = null;   // short clip recorder for keyword detection
 let clipChunks = [];
 let prevClipBlob = null;   // previous clip as a finished blob
+let keywordScanInterval = null;  // periodic keyword scan timer
 let clipInterval = null;
 let _sessions = [];  // loaded for session switching
 let audioContext = null;
 let analyser = null;
 let volumeInterval = null;
-let wasTalking = false;
-let silenceTimer = null;
 let processing = false;    // prevent overlapping keyword checks
 
 const VOLUME_THRESHOLD = 10;
-const SILENCE_AFTER_SPEECH_MS = 2000;  // silence needed to trigger keyword check
-const CLIP_DURATION_MS = 3000;         // rolling clip length
+const KEYWORD_SCAN_MS = 3000;  // scan for keyword every 3 seconds
 
 function sparkLog(msg) {
     fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({msg})}).catch(()=>{});
@@ -239,12 +272,25 @@ function scrollTerminal(direction) {
     window.scrollTo(0, 0);
 }
 
-function sendKey(key) {
-    fetch('/api/key', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({key: key}),
-    });
+async function sendKey(key) {
+    try {
+        const res = await fetch('/api/key', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key: key}),
+        });
+        if (!res.ok) sparkLog('KEY_ERR: ' + res.status);
+    } catch (e) {
+        sparkLog('KEY_FETCH_ERR: ' + e.message);
+        // Retry once after 200ms
+        setTimeout(() => {
+            fetch('/api/key', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({key: key}),
+            }).catch(() => {});
+        }, 200);
+    }
 }
 
 function sendSlashNew() {
@@ -295,6 +341,7 @@ async function startListening() {
         audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
         startMainRecorder();
         startVolumeMonitor();
+        startKeywordScanner();
         listening = true;
         document.getElementById('mic-btn').classList.add('listening');
         setStatus('Recording... say "go ahead" to send');
@@ -307,6 +354,7 @@ async function startListening() {
 
 function stopListening() {
     stopVolumeMonitor();
+    stopKeywordScanner();
     stopClipCycle();
     if (mainRecorder && mainRecorder.state === 'recording') {
         try { mainRecorder.stop(); } catch(e) {}
@@ -359,7 +407,7 @@ function startNewClip() {
     sparkLog('CLIP_REC_START');
 }
 
-// --- Volume monitoring ---
+// --- Volume monitoring (UI only — keyword scanning is separate) ---
 async function startVolumeMonitor() {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
     if (audioContext.state === 'suspended') await audioContext.resume();
@@ -375,26 +423,11 @@ async function startVolumeMonitor() {
         const avg = data.reduce((a, b) => a + b, 0) / data.length;
 
         if (avg > VOLUME_THRESHOLD) {
-            if (!wasTalking) {
-                wasTalking = true;
-                sparkLog('VOICE_START');
-                startNewClip();  // start recording a clip when speech begins
-            }
-            cancelSilenceTimer();
             document.getElementById('mic-btn').classList.add('recording');
-            setStatus('Hearing you...');
-        } else if (wasTalking) {
+            setStatus('🎙 ' + Math.round(avg) + ' dB');
+        } else {
             document.getElementById('mic-btn').classList.remove('recording');
             if (listening) document.getElementById('mic-btn').classList.add('listening');
-            if (!silenceTimer) {
-                silenceTimer = setTimeout(() => {
-                    silenceTimer = null;
-                    wasTalking = false;
-                    sparkLog('SILENCE -> checking keyword clip');
-                    setStatus('Checking for keyword...');
-                    checkClipForKeyword();
-                }, SILENCE_AFTER_SPEECH_MS);
-            }
         }
     }, 100);
 }
@@ -403,15 +436,77 @@ function stopVolumeMonitor() {
     if (volumeInterval) { clearInterval(volumeInterval); volumeInterval = null; }
     if (audioContext) { audioContext.close(); audioContext = null; }
     analyser = null;
-    wasTalking = false;
-    cancelSilenceTimer();
 }
 
-function cancelSilenceTimer() {
-    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+// --- Periodic keyword scanner (runs independently of silence) ---
+function startKeywordScanner() {
+    startNewClip();  // start first clip immediately
+    keywordScanInterval = setInterval(() => {
+        if (processing || isSpeaking) return;
+        sparkLog('SCAN -> checking keyword clip');
+        checkClipForKeyword();
+    }, KEYWORD_SCAN_MS);
+    sparkLog('KEYWORD_SCANNER_START: every ' + KEYWORD_SCAN_MS + 'ms');
 }
 
-// --- Check the short clip for "go ahead" or "clear" ---
+function stopKeywordScanner() {
+    if (keywordScanInterval) { clearInterval(keywordScanInterval); keywordScanInterval = null; }
+}
+
+// --- Score how well two strings match (0-1, higher = better) ---
+function score(a, b) {
+    if (a === b) return 1;
+    if (a.includes(b) || b.includes(a)) return 0.9;
+    let m = 0;
+    for (let i = 0; i < Math.min(a.length, b.length); i++) { if (a[i] === b[i]) m++; }
+    return m / Math.max(a.length, b.length);
+}
+
+// --- All command targets ---
+function getCommandTargets() {
+    return [
+        // Keys
+        {names: ['enter', 'nter', 'inter', 'entr'], act: () => sendKey('Enter'), label: 'enter'},
+        {names: ['tab', 'tabs', 'tap'], act: () => sendKey('Tab'), label: 'tab'},
+        {names: ['shift tab', 'ship tab', 'shift tap'], act: () => sendKey('BTab'), label: 'shift tab'},
+        {names: ['escape', 'scape', 'escap', 'scap'], act: () => sendKey('Escape'), label: 'escape'},
+        {names: ['control c', 'ctrl c', 'control see'], act: () => sendKey('C-c'), label: 'ctrl-c'},
+        {names: ['control z', 'ctrl z', 'control zee'], act: () => sendKey('C-z'), label: 'ctrl-z'},
+        {names: ['control v', 'ctrl v', 'control vee'], act: () => sendKey('C-v'), label: 'ctrl-v'},
+        {names: ['control d', 'ctrl d', 'control dee'], act: () => sendKey('C-d'), label: 'ctrl-d'},
+        {names: ['up', 'app', 'uhp'], act: () => sendKey('Up'), label: 'up'},
+        {names: ['down', 'don', 'doun'], act: () => sendKey('Down'), label: 'down'},
+        {names: ['left', 'lef', 'lift'], act: () => sendKey('Left'), label: 'left'},
+        {names: ['right', 'rite', 'write'], act: () => sendKey('Right'), label: 'right'},
+        {names: ['yes', 'yep', 'yeah', 'yess'], act: () => sendKey('y Enter'), label: 'yes'},
+        {names: ['no', 'nope', 'nah'], act: () => sendKey('n Enter'), label: 'no'},
+        {names: ['one', 'won', 'wan'], act: () => sendKey('1 Enter'), label: '1'},
+        {names: ['two', 'too', 'tu'], act: () => sendKey('2 Enter'), label: '2'},
+        {names: ['three', 'tree', 'free'], act: () => sendKey('3 Enter'), label: '3'},
+        // Navigation
+        {names: ['main menu', 'main many', 'menu', 'lobby', 'go back', 'go home', 'home'], act: () => { window.location.href = '/'; }, label: 'main menu'},
+        {names: ['clear', 'clair', 'kleer', 'klear'], act: () => {
+            if (mainRecorder && mainRecorder.state === 'recording') try { mainRecorder.stop(); } catch(e) {}
+            mainChunks = [];
+            if (listening) startMainRecorder();
+            setStatus('Recording cleared.');
+        }, label: 'clear'},
+        // Sessions
+        ..._sessions.map(s => ({
+            names: [s.name.toLowerCase(), s.id],
+            act: () => {
+                fetch('/api/session', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id: s.id}),
+                }).then(() => { window.location.href = '/chat'; });
+            },
+            label: 'session: ' + s.name,
+        })),
+    ];
+}
+
+// --- Check the short clip for "go ahead" ---
 async function checkClipForKeyword() {
     if (processing) return;
     processing = true;
@@ -428,7 +523,6 @@ async function checkClipForKeyword() {
         sparkLog('CLIP: no chunks');
         processing = false;
         if (listening) startNewClip();
-        setStatus('Recording... say "go ahead" to send');
         return;
     }
 
@@ -447,113 +541,43 @@ async function checkClipForKeyword() {
         if (data.text) {
             const heard = data.text.trim().toLowerCase();
             sparkLog('CLIP_HEARD: ' + heard);
-            setStatus('Heard: "' + data.text.trim().substring(0, 50) + '"');
 
-            // Check for "send key [command]" first
-            const sendKeyMatch = heard.match(/send key\s+(.+?)\.?$/);
-            if (sendKeyMatch) {
-                const raw = sendKeyMatch[1].toLowerCase().trim().replace(/[^a-z ]/g, '');
-                sparkLog('SENDKEY_RAW: ' + raw);
+            if (heard.includes('go ahead')) {
+                // Extract what comes before "go ahead"
+                const before = heard.split('go ahead')[0].trim().replace(/[^a-z ]/g, '');
+                sparkLog('GO_AHEAD prefix: "' + before + '"');
 
-                // Score how well two strings match (0-1, higher = better)
-                function score(a, b) {
-                    if (a === b) return 1;
-                    if (a.includes(b) || b.includes(a)) return 0.9;
-                    let m = 0;
-                    for (let i = 0; i < Math.min(a.length, b.length); i++) { if (a[i] === b[i]) m++; }
-                    return m / Math.max(a.length, b.length);
-                }
+                if (before) {
+                    // Check if the prefix matches a command
+                    const targets = getCommandTargets();
+                    let bestScore = 0, bestTarget = null;
+                    for (const t of targets) {
+                        for (const n of t.names) {
+                            const s = score(before, n);
+                            if (s > bestScore) { bestScore = s; bestTarget = t; }
+                        }
+                    }
 
-                // Build one flat list of all valid targets
-                const ALL_TARGETS = [
-                    // Keys
-                    ...[
-                        {names: ['enter', 'nter', 'inter', 'entr'], act: () => sendKey('Enter'), label: 'enter'},
-                        {names: ['tab', 'tabs', 'tap'], act: () => sendKey('Tab'), label: 'tab'},
-                        {names: ['shift tab', 'ship tab', 'shift tap'], act: () => sendKey('BTab'), label: 'shift tab'},
-                        {names: ['escape', 'scape', 'escap', 'scap'], act: () => sendKey('Escape'), label: 'escape'},
-                        {names: ['control c', 'ctrl c', 'control see'], act: () => sendKey('C-c'), label: 'ctrl-c'},
-                        {names: ['control z', 'ctrl z', 'control zee'], act: () => sendKey('C-z'), label: 'ctrl-z'},
-                        {names: ['control v', 'ctrl v', 'control vee'], act: () => sendKey('C-v'), label: 'ctrl-v'},
-                        {names: ['control d', 'ctrl d', 'control dee'], act: () => sendKey('C-d'), label: 'ctrl-d'},
-                        {names: ['up', 'app', 'uhp'], act: () => sendKey('Up'), label: 'up'},
-                        {names: ['down', 'don', 'doun'], act: () => sendKey('Down'), label: 'down'},
-                        {names: ['left', 'lef', 'lift'], act: () => sendKey('Left'), label: 'left'},
-                        {names: ['right', 'rite', 'write'], act: () => sendKey('Right'), label: 'right'},
-                        {names: ['yes', 'yep', 'yeah', 'yess'], act: () => sendKey('y Enter'), label: 'yes'},
-                        {names: ['no', 'nope', 'nah'], act: () => sendKey('n Enter'), label: 'no'},
-                        {names: ['one', 'won', 'wan'], act: () => sendKey('1 Enter'), label: '1'},
-                        {names: ['two', 'too', 'tu'], act: () => sendKey('2 Enter'), label: '2'},
-                        {names: ['three', 'tree', 'free'], act: () => sendKey('3 Enter'), label: '3'},
-                    ],
-                    // Navigation
-                    {names: ['main menu', 'main many', 'menu', 'lobby', 'go back', 'go home', 'home'], act: () => { window.location.href = '/'; }, label: 'main menu'},
-                    {names: ['clear', 'clair', 'kleer', 'klear'], act: () => {
-                        if (mainRecorder && mainRecorder.state === 'recording') try { mainRecorder.stop(); } catch(e) {}
-                        mainChunks = [];
-                        if (listening) startMainRecorder();
-                        setStatus('Recording cleared.');
-                    }, label: 'clear'},
-                    // Sessions
-                    ..._sessions.map(s => ({
-                        names: [s.name.toLowerCase(), s.id],
-                        act: () => {
-                            fetch('/api/session', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({id: s.id}),
-                            }).then(() => { window.location.href = '/chat'; });
-                        },
-                        label: 'session: ' + s.name,
-                    })),
-                ];
-
-                // Find best match across all targets
-                let bestScore = 0, bestTarget = null;
-                for (const t of ALL_TARGETS) {
-                    for (const n of t.names) {
-                        const s = score(raw, n);
-                        if (s > bestScore) { bestScore = s; bestTarget = t; }
+                    if (bestTarget && bestScore >= 0.5) {
+                        // It's a command: "enter go ahead", "tab go ahead", etc.
+                        sparkLog('CMD_MATCH: "' + before + '" -> ' + bestTarget.label + ' (score=' + bestScore.toFixed(2) + ')');
+                        setStatus(bestTarget.label);
+                        bestTarget.act();
+                        processing = false;
+                        if (listening) startNewClip();
+                        return;
                     }
                 }
 
-                if (bestTarget && bestScore >= 0.5) {
-                    sparkLog('SENDKEY_MATCH: "' + raw + '" -> ' + bestTarget.label + ' (score=' + bestScore.toFixed(2) + ')');
-                    setStatus(bestTarget.label);
-                    bestTarget.act();
-                    processing = false;
-                    if (listening) startNewClip();
-                    return;
-                }
-
-                sparkLog('SENDKEY_NOMATCH: ' + raw + ' (best=' + bestScore.toFixed(2) + ')');
-                setStatus('No match for: ' + raw);
-                processing = false;
-                if (listening) startNewClip();
-                return;
-            }
-
-            if (heard.includes('go ahead')) {
+                // No command prefix (or no match) — full transcription
                 sparkLog('CLIP_MATCH: go ahead -> full transcribe');
                 setStatus('GO AHEAD! Transcribing full recording...');
                 await sendFullRecording();
-            } else if (heard.includes('clear')) {
-                sparkLog('CLIP_MATCH: clear -> reset');
-                if (mainRecorder && mainRecorder.state === 'recording') {
-                    try { mainRecorder.stop(); } catch(e) {}
-                }
-                mainChunks = [];
-                if (listening) startMainRecorder();
-                setStatus('Recording cleared. Keep talking...');
-            } else {
-                setStatus('Recording... say "go ahead" to send');
             }
-        } else {
-            setStatus('Recording... say "go ahead" to send');
+            // No "go ahead" found — just keep listening, no action
         }
     } catch (e) {
         sparkLog('CLIP_ERROR: ' + e.message);
-        setStatus('Recording... say "go ahead" to send');
     }
 
     processing = false;
@@ -742,10 +766,53 @@ function setThemeColor(id) {
     document.documentElement.style.setProperty('--flame-mid', c + '40');
 }
 
+// --- Tab labels (editable, stored in localStorage) ---
+const TAB_IDS = ['dev', 'nimbus', 'alpha', 'bravo', 'charlie', 'delta'];
+const TAB_DEFAULTS = {dev: '1', nimbus: '2', alpha: '3', bravo: '4', charlie: '5', delta: '6'};
+
+function getTabLabel(id) {
+    return localStorage.getItem('tab-label-' + id) || TAB_DEFAULTS[id] || id;
+}
+
+function setTabLabel(id, label) {
+    localStorage.setItem('tab-label-' + id, label);
+    const el = document.getElementById('tab-' + id);
+    if (el) el.textContent = label;
+}
+
+function loadTabLabels() {
+    TAB_IDS.forEach(id => {
+        const el = document.getElementById('tab-' + id);
+        if (el) el.textContent = getTabLabel(id);
+    });
+}
+
+// Long-press to rename a tab
+let longPressTimer = null;
+TAB_IDS.forEach(id => {
+    const el = document.getElementById('tab-' + id);
+    if (!el) return;
+    el.addEventListener('touchstart', (e) => {
+        longPressTimer = setTimeout(() => {
+            e.preventDefault();
+            const name = prompt('Label for this tab:', getTabLabel(id));
+            if (name !== null && name.trim()) setTabLabel(id, name.trim());
+        }, 600);
+    }, {passive: false});
+    el.addEventListener('touchend', () => clearTimeout(longPressTimer));
+    el.addEventListener('touchmove', () => clearTimeout(longPressTimer));
+    // Desktop: right-click to rename
+    el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const name = prompt('Label for this tab:', getTabLabel(id));
+        if (name !== null && name.trim()) setTabLabel(id, name.trim());
+    });
+});
+
 function highlightActiveSession() {
     const active = '{{ session.id }}';
-    document.querySelectorAll('.fire-btn').forEach(b => b.classList.remove('active'));
-    const el = document.getElementById('fire-' + active);
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    const el = document.getElementById('tab-' + active);
     if (el) el.classList.add('active');
     setThemeColor(active);
 }
@@ -758,18 +825,27 @@ if (localStorage.getItem('speakEnabled') === 'true') {
     });
 }
 
-// Load sessions for voice switching, then auto-start mic
+// Release mic when page is hidden (tab switch, alt-tab); re-acquire when visible
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        if (listening) stopListening();
+    } else {
+        if (!listening) toggleListening();
+    }
+});
+
+// Load sessions on startup, auto-start mic
 window.addEventListener('load', async () => {
     try {
         const res = await fetch('/api/sessions');
         const data = await res.json();
         _sessions = data.sessions;
     } catch(e) {}
-    // Don't seed — let the first stable screen get read back on entry
-    // Start TTS polling if speaker was on
+    loadTabLabels();
     if (speakEnabled) pollTranscript();
     highlightActiveSession();
-    setTimeout(toggleListening, 500);
+    // Auto-start mic on page load
+    if (!listening) toggleListening();
 });
 
 </script>

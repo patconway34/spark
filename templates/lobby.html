@@ -361,8 +361,16 @@ async function checkForSessionName() {
 
 loadSessions();
 
-// Auto-start mic on page load
-window.addEventListener('load', () => { setTimeout(toggleMic, 500); });
+// Release mic when page is hidden (tab switch, alt-tab); re-acquire when visible
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        if (listening) toggleMic();
+    } else {
+        if (!listening) toggleMic();
+    }
+});
+
+// Mic starts only on tap — no auto-start
 </script>
 </body>
 </html>

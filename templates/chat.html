@@ -589,10 +589,14 @@ async function checkClipForKeyword() {
             transcriptParts.push(commaPrefix + heard);
             sparkLog('CLIP_HEARD: ' + transcriptParts.join(' '));
 
-            // Check if "now" appears in the last 3 words
+            // Check if "now" (or "no" on longer clips) appears in the last 3 words
             const words = heard.replace(/[^a-z ]/g, '').trim().split(/\s+/);
             const lastThree = words.slice(-3);
-            const nowIdx = lastThree.lastIndexOf('now');
+            let nowIdx = lastThree.lastIndexOf('now');
+            // Treat "no" as "now" if there are 4+ words (not a short "no" command)
+            if (nowIdx === -1 && words.length >= 4) {
+                nowIdx = lastThree.lastIndexOf('no');
+            }
 
             if (nowIdx !== -1) {
                 // Strip "now" and anything after it

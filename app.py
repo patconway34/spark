@@ -464,8 +464,8 @@ def scroll():
     if direction == "up":
         cmd = f"tmux copy-mode -t {tmux} 2>/dev/null; tmux send-keys -t {tmux} -X page-up 2>/dev/null"
     else:
-        # Jump to bottom of history and exit copy-mode so we're back at the live input
-        cmd = f"tmux send-keys -t {tmux} -X history-bottom 2>/dev/null; tmux send-keys -t {tmux} -X cancel 2>/dev/null"
+        # Exit copy-mode entirely so terminal snaps back to live input
+        cmd = f"tmux copy-mode -q -t {tmux} 2>/dev/null"
     subprocess.run(["wsl", "bash", "-c", cmd], capture_output=True, timeout=15)
     return jsonify({"ok": True})
 

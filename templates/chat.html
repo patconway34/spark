@@ -54,9 +54,9 @@
             justify-content: center;
         }
         .key-btn {
-            height: 34px;
+            height: 38px;
             flex: 1;
-            max-width: 60px;
+            max-width: 80px;
             border: 1px solid #3a3a5e;
             border-radius: 6px;
             background: #2a2a4e;
@@ -159,21 +159,15 @@
 
 <div id="controls">
     <div class="key-row">
-        <button class="key-btn" onclick="sendKey('Escape')">Esc</button>
-        <button class="key-btn" onclick="sendKey('Tab')">Tab</button>
+        <button class="key-btn" onclick="sendSlashNew()" style="font-size:0.7rem;font-weight:600;letter-spacing:-0.5px;">/new</button>
         <button class="key-btn" onclick="sendKey('BTab')">⇧Tab</button>
-        <button class="key-btn" onclick="sendKey('C-z')">^Z</button>
-        <button class="key-btn" onclick="sendKey('C-c')">^C</button>
-        <button class="key-btn" onclick="sendKey('C-v')">^V</button>
+        <button class="key-btn" onclick="sendKey('Tab')">Tab</button>
+        <button class="key-btn" onclick="sendKey('Escape')">Esc</button>
         <button class="key-btn" onclick="sendKey('Enter')">Enter</button>
     </div>
     <div class="key-row">
-        <button class="key-btn" onclick="sendSlashNew()" style="font-size:0.7rem;font-weight:600;letter-spacing:-0.5px;">/new</button>
         <button class="key-btn" onclick="sendKey('Up')">&#9650;</button>
         <button class="key-btn" onclick="sendKey('Down')">&#9660;</button>
-        <button class="key-btn" onclick="sendKey('Left')">&#9664;</button>
-        <button class="key-btn" onclick="sendKey('Right')">&#9654;</button>
-        <span style="width:6px;"></span>
         <button class="key-btn" onclick="scrollTerminal('up')" style="font-size:0.55rem;">PgUp</button>
         <button class="key-btn" onclick="scrollTerminal('down')" style="font-size:0.55rem;">PgDn</button>
     </div>

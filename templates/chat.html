@@ -256,6 +256,8 @@ let silenceTimer = null;   // fires after sustained silence post-speech
 let silenceCommas = 0;     // counts seconds of silence (for keyword check)
 let tickTimer = null;      // global 1s ticker while mic is quiet
 let totalTicks = 0;        // total silent seconds in current quiet stretch
+let pendingCommas = 0;     // commas to prepend to next transcript chunk
+let transcriptParts = [];  // accumulates text + commas between keyword checks
 
 const VOLUME_THRESHOLD = 20;
 const SILENCE_SECONDS = 2;  // seconds of silence before checking clip
@@ -436,12 +438,12 @@ async function startVolumeMonitor() {
         } else {
             document.getElementById('mic-btn').classList.remove('recording');
             if (listening) document.getElementById('mic-btn').classList.add('listening');
-            // Start ticking every second of silence (always, even without prior speech)
+            // Start ticking every second of silence
             if (!tickTimer) {
                 totalTicks = 0;
                 tickTimer = setInterval(() => {
                     totalTicks++;
-                    sparkLog(',');
+                    pendingCommas++;
                     setStatus(', '.repeat(totalTicks).trim());
                 }, 1000);
             }
@@ -471,6 +473,8 @@ function startKeywordScanner() {
     startNewClip();  // start first clip immediately
     wasTalking = false;
     silenceTimer = null;
+    transcriptParts = [];
+    pendingCommas = 0;
     sparkLog('KEYWORD_SCANNER_START: silence-triggered');
 }
 
@@ -480,6 +484,8 @@ function stopKeywordScanner() {
     wasTalking = false;
     silenceCommas = 0;
     totalTicks = 0;
+    transcriptParts = [];
+    pendingCommas = 0;
 }
 
 // --- Score how well two strings match (0-1, higher = better) ---
@@ -577,8 +583,11 @@ async function checkClipForKeyword() {
         const data = await res.json();
         if (data.text) {
             const heard = data.text.trim().toLowerCase();
-            const silenceSuffix = silenceCommas > 0 ? ' ' + ', '.repeat(silenceCommas).trim() : '';
-            sparkLog('CLIP_HEARD: ' + heard + silenceSuffix);
+            // Prepend any accumulated silence commas before this speech
+            const commaPrefix = pendingCommas > 0 ? ', '.repeat(pendingCommas) : '';
+            pendingCommas = 0;
+            transcriptParts.push(commaPrefix + heard);
+            sparkLog('CLIP_HEARD: ' + transcriptParts.join(' '));
 
             // Check if last word is "now"
             const words = heard.replace(/[^a-z ]/g, '').trim().split(/\s+/);
@@ -604,6 +613,8 @@ async function checkClipForKeyword() {
                         sparkLog('CMD_MATCH: "' + before + '" -> ' + bestTarget.label + ' (score=' + bestScore.toFixed(2) + ')');
                         setStatus(bestTarget.label);
                         bestTarget.act();
+                        transcriptParts = [];
+                        pendingCommas = 0;
                         processing = false;
                         if (listening) startNewClip();
                         return;
@@ -614,6 +625,8 @@ async function checkClipForKeyword() {
                 sparkLog('CLIP_MATCH: now -> full transcribe');
                 setStatus('NOW! Transcribing full recording...');
                 await sendFullRecording();
+                transcriptParts = [];
+                pendingCommas = 0;
             }
             // No "now" found — just keep listening, no action
         }

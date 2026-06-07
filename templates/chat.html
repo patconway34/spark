@@ -255,9 +255,11 @@ let audioContext = null;
 let analyser = null;
 let volumeInterval = null;
 let processing = false;    // prevent overlapping keyword checks
+let wasTalking = false;    // true when volume was above threshold
+let silenceTimer = null;   // fires after sustained silence
 
 const VOLUME_THRESHOLD = 10;
-const KEYWORD_SCAN_MS = 3000;  // scan for keyword every 3 seconds
+const SILENCE_DELAY_MS = 2000;  // wait 2s of silence before checking clip
 
 function sparkLog(msg) {
     fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({msg})}).catch(()=>{});
@@ -425,9 +427,21 @@ async function startVolumeMonitor() {
         if (avg > VOLUME_THRESHOLD) {
             document.getElementById('mic-btn').classList.add('recording');
             setStatus('🎙 ' + Math.round(avg) + ' dB');
+            wasTalking = true;
+            // Cancel any pending silence check — still talking
+            if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
         } else {
             document.getElementById('mic-btn').classList.remove('recording');
             if (listening) document.getElementById('mic-btn').classList.add('listening');
+            // If we were talking and now silent, start silence timer
+            if (wasTalking && !silenceTimer) {
+                silenceTimer = setTimeout(() => {
+                    silenceTimer = null;
+                    wasTalking = false;
+                    sparkLog('SILENCE -> checking clip for keyword');
+                    checkClipForKeyword();
+                }, SILENCE_DELAY_MS);
+            }
         }
     }, 100);
 }
@@ -438,19 +452,17 @@ function stopVolumeMonitor() {
     analyser = null;
 }
 
-// --- Periodic keyword scanner (runs independently of silence) ---
+// --- Keyword scanner (triggered by silence, not a timer) ---
 function startKeywordScanner() {
     startNewClip();  // start first clip immediately
-    keywordScanInterval = setInterval(() => {
-        if (processing || isSpeaking) return;
-        sparkLog('SCAN -> checking keyword clip');
-        checkClipForKeyword();
-    }, KEYWORD_SCAN_MS);
-    sparkLog('KEYWORD_SCANNER_START: every ' + KEYWORD_SCAN_MS + 'ms');
+    wasTalking = false;
+    silenceTimer = null;
+    sparkLog('KEYWORD_SCANNER_START: silence-triggered');
 }
 
 function stopKeywordScanner() {
-    if (keywordScanInterval) { clearInterval(keywordScanInterval); keywordScanInterval = null; }
+    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+    wasTalking = false;
 }
 
 // --- Score how well two strings match (0-1, higher = better) ---

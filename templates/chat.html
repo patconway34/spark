@@ -125,13 +125,13 @@
             color: #fff;
         }
         .tab-btn {
-            height: 28px;
-            padding: 0 8px;
+            height: 32px;
+            padding: 0 12px;
             border: 1px solid #3a3a5e;
-            border-radius: 14px;
+            border-radius: 16px;
             background: #2a2a4e;
             color: #999;
-            font-size: 0.65rem;
+            font-size: 0.7rem;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             cursor: pointer;
             white-space: nowrap;
@@ -191,7 +191,8 @@
         <button id="blink-btn" class="bar-btn" onclick="toggleBlink()" style="width:34px;height:34px;" title="Blink">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         </button>
-        <span style="width:8px;"></span>
+    </div>
+    <div class="key-row" style="justify-content: center; gap: 0.3rem; flex-wrap: wrap;">
         <button class="tab-btn" onclick="switchSession('dev')" id="tab-dev">1</button>
         <button class="tab-btn" onclick="switchSession('nimbus')" id="tab-nimbus">2</button>
         <button class="tab-btn" onclick="switchSession('alpha')" id="tab-alpha">3</button>
@@ -199,7 +200,7 @@
         <button class="tab-btn" onclick="switchSession('charlie')" id="tab-charlie">5</button>
         <button class="tab-btn" onclick="switchSession('delta')" id="tab-delta">6</button>
     </div>
-    <div style="height: 68px;"></div>
+    <div style="height: 100px;"></div>
 </div>
 
 <script>

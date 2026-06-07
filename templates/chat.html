@@ -573,8 +573,8 @@ async function checkClipForKeyword() {
                 const before = words.slice(0, -1).join(' ').trim();
                 sparkLog('NOW prefix: "' + before + '"');
 
-                if (before) {
-                    // Check if the prefix matches a voice command
+                // Only try command matching on short phrases (1-3 words)
+                if (before && words.length <= 4) {
                     const targets = getCommandTargets();
                     let bestScore = 0, bestTarget = null;
                     for (const t of targets) {

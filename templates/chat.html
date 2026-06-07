@@ -252,8 +252,10 @@ let volumeInterval = null;
 let processing = false;    // prevent overlapping keyword checks
 let wasTalking = false;    // true when volume was above threshold
 let clipHadSpeech = false; // true if current clip had any speech above threshold
-let silenceTimer = null;   // fires every 1s during silence
-let silenceCommas = 0;     // counts seconds of silence
+let silenceTimer = null;   // fires after sustained silence post-speech
+let silenceCommas = 0;     // counts seconds of silence (for keyword check)
+let tickTimer = null;      // global 1s ticker while mic is quiet
+let totalTicks = 0;        // total silent seconds in current quiet stretch
 
 const VOLUME_THRESHOLD = 20;
 const SILENCE_SECONDS = 2;  // seconds of silence before checking clip
@@ -427,26 +429,32 @@ async function startVolumeMonitor() {
             setStatus('🎙 ' + Math.round(avg) + ' dB');
             wasTalking = true;
             clipHadSpeech = true;
-            // Cancel any pending silence check — still talking
-            if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; silenceCommas = 0; }
+            // Cancel silence countdown and tick timer
+            if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; silenceCommas = 0; }
+            if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+            totalTicks = 0;
         } else {
             document.getElementById('mic-btn').classList.remove('recording');
             if (listening) document.getElementById('mic-btn').classList.add('listening');
-            // If we were talking and now silent, start counting silence
+            // Start ticking every second of silence (always, even without prior speech)
+            if (!tickTimer) {
+                totalTicks = 0;
+                tickTimer = setInterval(() => {
+                    totalTicks++;
+                    sparkLog(',');
+                    setStatus(', '.repeat(totalTicks).trim());
+                }, 1000);
+            }
+            // If we were talking and now silent, start keyword countdown
             if (wasTalking && !silenceTimer) {
                 silenceCommas = 0;
-                silenceTimer = setInterval(() => {
-                    silenceCommas++;
-                    sparkLog('SILENCE_TICK: ' + ','.repeat(silenceCommas));
-                    setStatus('Silence ' + ','.repeat(silenceCommas));
-                    if (silenceCommas >= SILENCE_SECONDS) {
-                        clearInterval(silenceTimer);
-                        silenceTimer = null;
-                        wasTalking = false;
-                        sparkLog('SILENCE -> checking clip for keyword');
-                        checkClipForKeyword();
-                    }
-                }, 1000);
+                silenceTimer = setTimeout(() => {
+                    silenceTimer = null;
+                    silenceCommas = totalTicks;
+                    wasTalking = false;
+                    sparkLog('SILENCE -> checking clip for keyword');
+                    checkClipForKeyword();
+                }, SILENCE_SECONDS * 1000);
             }
         }
     }, 100);
@@ -467,9 +475,11 @@ function startKeywordScanner() {
 }
 
 function stopKeywordScanner() {
-    if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
+    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+    if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
     wasTalking = false;
     silenceCommas = 0;
+    totalTicks = 0;
 }
 
 // --- Score how well two strings match (0-1, higher = better) ---

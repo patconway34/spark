@@ -261,6 +261,7 @@ let transcriptParts = [];  // accumulates text + commas between keyword checks
 
 const VOLUME_THRESHOLD = 10;
 const SILENCE_SECONDS = 2;  // seconds of silence before checking clip
+let practiceMode = false;   // when true, logs matches but doesn't fire
 
 function sparkLog(msg) {
     fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({msg})}).catch(()=>{});
@@ -620,8 +621,13 @@ async function checkClipForKeyword() {
                     if (bestTarget && bestScore >= 0.5) {
                         // Short command: "enter now", "tab now", etc.
                         sparkLog('CMD_MATCH: "' + before + '" -> ' + bestTarget.label + ' (score=' + bestScore.toFixed(2) + ')');
-                        setStatus(bestTarget.label);
-                        bestTarget.act();
+                        if (practiceMode) {
+                            setStatus('✓ ' + bestTarget.label + ' (practice)');
+                            sparkLog('PRACTICE_HIT: ' + bestTarget.label);
+                        } else {
+                            setStatus(bestTarget.label);
+                            bestTarget.act();
+                        }
                         transcriptParts = [];
                         pendingCommas = 0;
                         processing = false;
@@ -632,8 +638,13 @@ async function checkClipForKeyword() {
 
                 // Long text or no command match — full transcription
                 sparkLog('CLIP_MATCH: now -> full transcribe');
-                setStatus('NOW! Transcribing full recording...');
-                await sendFullRecording();
+                if (practiceMode) {
+                    setStatus('✓ SEND (practice)');
+                    sparkLog('PRACTICE_SEND: ' + transcriptParts.join(' ').substring(0, 200));
+                } else {
+                    setStatus('NOW! Transcribing full recording...');
+                    await sendFullRecording();
+                }
                 transcriptParts = [];
                 pendingCommas = 0;
             }

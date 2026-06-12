@@ -36,29 +36,22 @@ Tap mic (purple) → mic turns green (listening)
   └── Tap mic again → mic off, recording stops, volume monitor stops
 ```
 
-## Trigger Word: "go ahead"
+## Trigger Phrase: "go ahead"
 
-- The word **"go ahead"** at the end of speech is the send trigger
-- If transcription doesn't end with "go ahead", the text is discarded and spark keeps listening
-- This prevents background noise and partial sentences from being sent
-- "Over" itself is stripped from the text before sending
+- **"go ahead"** anywhere in a clip sends the full accumulated transcript to Claude
+- Voice commands ("press enter", "send yes") fire immediately — no "go ahead" needed
+- If neither trigger is detected, the clip is accumulated and spark keeps listening
+- This cleanly separates commands (instant) from dictation (requires "go ahead")
 
 ## Voice Commands
 
-These short phrases bypass text input and send raw keys to tmux:
+Only enter and escape are voice commands. Everything else is manual buttons.
 
 | Say | Sends |
 |-----|-------|
-| enter | Enter |
-| tab | Tab |
-| control c | Ctrl+C |
-| control z | Ctrl+Z |
-| control d | Ctrl+D |
-| escape | Escape |
-| up / down / left / right | Arrow keys |
-| yes | y + Enter |
-| no | n + Enter |
-| one / two / three | 1/2/3 + Enter |
+| press enter | Enter |
+| press escape | Escape |
+| go back / go home | Main menu |
 
 ## TTS (Voice Output)
 
@@ -90,6 +83,8 @@ Two rows of key buttons (Esc, Tab, Enter, ^C, ^Z, ^D, arrows, Yes, No) plus numb
 
 ## Story
 
+2026-06-10 — /talk became the command center: six status cards (folder names on top, big goal sentence via Mente, immediate action below, or Inactive), question queue on top, mic with level readout and transcript preview, "hey alpha ..." voice routing with still-point check (won't interrupt a working session). Background feed thread scans all panes every 5s (/api/feed). Note: start.bat only restarts tmux/ttyd — the Flask app must be restarted separately (python app.py kills the old port holder itself).
+2026-06-10 — Multi-session question queue on /talk. Spark now watches all six tmux sessions, catches permission prompts and questions from any of them, and shows one at a time in a color-coded card (answer with 1/2/3/Enter/Esc, type a reply, or skip). Answers route back to the right session via tmux send-keys. New routes: /api/questions, /api/questions/answer.
 2026-05-31 — Documented full voice flow, trigger word, volume detection, and command map.
 2026-05-30 — Added dual STT: Browser (Web Speech API, always-on with "go" trigger) and Groq Whisper (push-to-talk via ventana/transcribe.py). Browser STT disabled (doesn't work on mobile). Cleaned up: removed hook-based prototype, pivoted to terminal-wrapping via puente's SSH session.
 2026-05-29 — Project created. Hook-based prototype built and tested. gTTS + Telegram delivery confirmed working. Hooks proved unreliable for real-time voice.

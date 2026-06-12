@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Spark Chat</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+header {
+    padding: 0.6rem 1rem;
+    background: #111122;
+    border-bottom: 1px solid #2a2a4e;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+header .title { font-weight: 600; flex: 1; }
+header a {
+    color: #3b82f6; text-decoration: none; font-size: 0.8rem;
+    padding: 0.35rem 0.8rem; border: 1px solid #3b82f680; border-radius: 14px;
+}
+@keyframes blink { 50% { opacity: 0.3; } }
+
+/* Question card */
+#question-bar {
+    display: none;
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid #2a2a4e;
+    background: #111122;
+}
+#q-card {
+    border-left: 4px solid #888;
+    background: #20203a;
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+}
+#q-session {
+    font-weight: 700;
+    font-size: 0.8rem;
+    margin-bottom: 0.3rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+#q-waiting { font-weight: 400; font-size: 0.7rem; color: #888; margin-left: auto; }
+#q-text {
+    font-size: 0.85rem;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #ddd;
+    max-height: 30vh;
+    overflow-y: auto;
+}
+#q-actions { display: flex; gap: 0.3rem; margin-top: 0.5rem; }
+.q-btn {
+    flex: 1;
+    height: 34px;
+    border: 1px solid #3a3a5e;
+    border-radius: 8px;
+    background: #2a2a4e;
+    color: #ccc;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+.q-btn:active { background: #5a5a8e; }
+.q-btn.skip { background: transparent; color: #888; }
+#q-reply-row { display: flex; gap: 0.3rem; margin-top: 0.4rem; }
+#q-reply {
+    flex: 1;
+    padding: 0.45rem 0.7rem;
+    border-radius: 14px;
+    border: 1px solid #3a3a5e;
+    background: #2a2a4e;
+    color: #e0e0e0;
+    font-size: 0.85rem;
+    outline: none;
+}
+#q-reply-send {
+    width: 60px;
+    border: none;
+    border-radius: 14px;
+    background: #2563eb;
+    color: #fff;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+/* Status feed */
+#feed {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    -webkit-overflow-scrolling: touch;
+}
+.card {
+    border-left: 4px solid #888;
+    background: #20203a;
+    border-radius: 10px;
+    padding: 0.65rem 0.85rem;
+    cursor: pointer;
+}
+.card.inactive { opacity: 0.4; cursor: default; }
+.card.selected { background: #2a2a4e; outline: 1.5px solid currentColor; }
+.card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+.card-name { font-weight: 700; font-size: 0.9rem; }
+.card-session { font-size: 0.7rem; color: #777; }
+.card-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #555; margin-left: auto; flex-shrink: 0;
+}
+.card.idle .card-dot { background: #2ecc71; }
+.card.working .card-dot { background: #fbbf24; animation: blink 1s infinite; }
+.card.question .card-dot { background: #e04040; animation: blink 0.6s infinite; }
+.card-big {
+    font-size: 0.92rem;
+    line-height: 1.35;
+    color: #e0e0e0;
+    word-break: break-word;
+}
+.card-small {
+    font-size: 0.75rem;
+    color: #888;
+    margin-top: 0.25rem;
+    word-break: break-word;
+}
+
+/* Toast */
+#toast {
+    display: none;
+    text-align: center;
+    font-size: 0.8rem;
+    color: #fbbf24;
+    padding: 0.3rem;
+}
+
+/* Mic */
+#mic-status {
+    text-align: center;
+    font-size: 0.75rem;
+    color: #888;
+    padding: 0.2rem 0.8rem;
+    min-height: 1.1rem;
+    background: #111122;
+}
+#voice-preview {
+    display: none;
+    font-size: 0.8rem;
+    color: #ccc;
+    background: #20203a;
+    border-top: 1px solid #2a2a4e;
+    padding: 0.4rem 0.8rem;
+    max-height: 4.5rem;
+    overflow-y: auto;
+    word-break: break-word;
+}
+#mic-btn {
+    width: 46px; height: 46px;
+    border: none; border-radius: 50%;
+    background: #7b6ba8; color: #fff;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    font-size: 1.1rem;
+}
+#mic-btn.listening { background: #2ecc71; }
+#mic-btn.recording { background: #e04040; animation: blink 1s infinite; }
+
+/* Composer */
+#composer {
+    background: #111122;
+    border-top: 1px solid #2a2a4e;
+    padding: 0.5rem;
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    gap: 0.4rem;
+}
+#text-input {
+    flex: 1;
+    padding: 0.7rem 0.9rem;
+    border-radius: 20px;
+    border: 1px solid #3a3a5e;
+    background: #2a2a4e;
+    color: #e0e0e0;
+    font-size: 1rem;
+    outline: none;
+}
+#send {
+    width: 46px; height: 46px;
+    border: none; border-radius: 50%;
+    background: #2563eb; color: #fff;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+#send:active { background: #1d4ed8; }
+</style>
+</head>
+<body>
+
+<header>
+    <span class="title">Spark</span>
+    <a href="/chat">Terminal</a>
+</header>
+
+<div id="question-bar">
+    <div id="q-card">
+        <div id="q-session">
+            <span id="q-name"></span>
+            <span id="q-waiting"></span>
+        </div>
+        <div id="q-text"></div>
+        <div id="q-actions">
+            <button class="q-btn" onclick="answerQ('1')">1</button>
+            <button class="q-btn" onclick="answerQ('2')">2</button>
+            <button class="q-btn" onclick="answerQ('3')">3</button>
+            <button class="q-btn" onclick="answerQ('Enter')">Enter</button>
+            <button class="q-btn" onclick="answerQ('Escape')">Esc</button>
+            <button class="q-btn skip" onclick="skipQ()">Skip</button>
+        </div>
+        <div id="q-reply-row">
+            <input id="q-reply" type="text" placeholder="Type an answer..."
+                   autocomplete="off" onkeydown="if(event.key==='Enter')answerQText()">
+            <button id="q-reply-send" onclick="answerQText()">Send</button>
+        </div>
+    </div>
+</div>
+
+<div id="feed"></div>
+<div id="toast"></div>
+
+<div id="voice-preview"></div>
+<div id="mic-status"></div>
+
+<div id="composer">
+    <button id="mic-btn" onclick="toggleMic()">🎙</button>
+    <input id="text-input" type="text" placeholder="Message... (or: hey alpha ...)"
+           autocomplete="off" onkeydown="if(event.key==='Enter')sendMessage()">
+    <button id="send" onclick="sendMessage()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M2 21l21-9L2 3v7l15 2-15 2z"></path>
+        </svg>
+    </button>
+</div>
+
+<script>
+const SESSION_COLORS = {
+    dev: '#3b82f6', nimbus: '#14b8a6', alpha: '#a78bfa',
+    bravo: '#f59e0b', charlie: '#ec4899', delta: '#22c55e',
+};
+const feedEl = document.getElementById('feed');
+const toastEl = document.getElementById('toast');
+const inputEl = document.getElementById('text-input');
+
+let sessionList = [];
+let target = null;   // session id tapped on a card (null = active session)
+
+function showToast(msg) {
+    toastEl.textContent = msg;
+    toastEl.style.display = 'block';
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => { toastEl.style.display = 'none'; }, 4000);
+}
+
+function renderFeed() {
+    feedEl.innerHTML = '';
+    for (const s of sessionList) {
+        const color = SESSION_COLORS[s.id] || '#888';
+        const card = document.createElement('div');
+        card.className = 'card ' + s.status + (target === s.id ? ' selected' : '');
+        card.style.borderLeftColor = color;
+        card.style.color = color;
+
+        const head = document.createElement('div');
+        head.className = 'card-head';
+        const name = document.createElement('span');
+        name.className = 'card-name';
+        const folders = (s.folders || []).join(' · ');
+        name.textContent = folders || s.name;
+        name.style.color = color;
+        head.appendChild(name);
+        if (folders && s.name.toLowerCase() !== (s.folders[0] || '').toLowerCase()) {
+            const sess = document.createElement('span');
+            sess.className = 'card-session';
+            sess.textContent = s.name;
+            head.appendChild(sess);
+        }
+        const dot = document.createElement('span');
+        dot.className = 'card-dot';
+        head.appendChild(dot);
+        card.appendChild(head);
+
+        const big = document.createElement('div');
+        big.className = 'card-big';
+        big.textContent = s.status === 'inactive' ? 'Inactive' : (s.big || '...');
+        card.appendChild(big);
+
+        if (s.status !== 'inactive' && s.small) {
+            const small = document.createElement('div');
+            small.className = 'card-small';
+            small.textContent = s.small;
+            card.appendChild(small);
+        }
+
+        card.onclick = () => {
+            if (s.status === 'inactive' || s.status === 'working') return; // still points only
+            target = (target === s.id) ? null : s.id;
+            inputEl.placeholder = target
+                ? 'Message ' + s.name + '...'
+                : 'Message... (or: hey alpha ...)';
+            renderFeed();
+        };
+        feedEl.appendChild(card);
+    }
+}
+
+// --- Question queue ---
+const qBar = document.getElementById('question-bar');
+const qCard = document.getElementById('q-card');
+const qName = document.getElementById('q-name');
+const qWaiting = document.getElementById('q-waiting');
+const qText = document.getElementById('q-text');
+let queue = [];
+let currentQ = null;
+const skipped = [];
+
+function pickCurrent() {
+    if (!queue.length) { currentQ = null; return; }
+    const fresh = queue.filter(q => !skipped.includes(q.hash));
+    const old = queue.filter(q => skipped.includes(q.hash))
+                     .sort((a, b) => skipped.indexOf(a.hash) - skipped.indexOf(b.hash));
+    currentQ = fresh[0] || old[0] || null;
+}
+
+function renderQ() {
+    if (!currentQ) { qBar.style.display = 'none'; return; }
+    const color = SESSION_COLORS[currentQ.id] || '#888';
+    qCard.style.borderLeftColor = color;
+    qName.textContent = currentQ.name;
+    qName.style.color = color;
+    qText.textContent = currentQ.text;
+    const more = queue.length - 1;
+    qWaiting.textContent = more > 0 ? `+${more} waiting` : '';
+    qBar.style.display = 'block';
+}
+
+function skipQ() {
+    if (!currentQ) return;
+    if (!skipped.includes(currentQ.hash)) skipped.push(currentQ.hash);
+    currentQ = null;
+    pickCurrent();
+    renderQ();
+}
+
+function clearQ(q) {
+    currentQ = null;
+    queue = queue.filter(x => x.hash !== q.hash);
+    pickCurrent();
+    renderQ();
+}
+
+async function answerQ(key) {
+    if (!currentQ) return;
+    const q = currentQ;
+    clearQ(q);
+    try {
+        await fetch('/api/questions/answer', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: q.id, hash: q.hash, key}),
+        });
+    } catch (e) {}
+}
+
+async function answerQText() {
+    if (!currentQ) return;
+    const input = document.getElementById('q-reply');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    const q = currentQ;
+    clearQ(q);
+    try {
+        await fetch('/api/questions/answer', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: q.id, hash: q.hash, text}),
+        });
+    } catch (e) {}
+}
+
+// --- Send ---
+async function sendMessage() {
+    const text = inputEl.value.trim();
+    if (!text) return;
+    inputEl.value = '';
+    try {
+        if (target) {
+            const res = await fetch('/api/send', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: target, text}),
+            });
+            const name = (sessionList.find(s => s.id === target) || {}).name || target;
+            if (res.status === 409) {
+                showToast(name + ' is still working — wait for a still point.');
+            } else {
+                showToast('Sent to ' + name);
+            }
+        } else {
+            const res = await fetch('/api/voice-text', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({text}),
+            });
+            const data = await res.json();
+            if (data.busy) {
+                showToast(data.routed + ' is still working — wait for a still point.');
+            } else if (data.routed) {
+                showToast('Sent to ' + data.routed);
+            } else {
+                showToast('Sent');
+            }
+        }
+    } catch (e) {}
+}
+
+// --- Poll feed ---
+async function pollFeed() {
+    try {
+        const res = await fetch('/api/feed');
+        const data = await res.json();
+        sessionList = data.sessions || [];
+        queue = data.questions || [];
+        renderFeed();
+        if (!currentQ || !queue.some(q => q.hash === currentQ.hash)) pickCurrent();
+        renderQ();
+    } catch (e) {}
+}
+
+// --- Mic (same engine as terminal page: clips + silence + "go ahead") ---
+const micBtn = document.getElementById('mic-btn');
+const micStatus = document.getElementById('mic-status');
+const previewEl = document.getElementById('voice-preview');
+
+let listening = false;
+let audioStream = null;
+let clipRecorder = null;
+let clipChunks = [];
+let clipHadSpeech = false;
+let audioContext = null;
+let analyser = null;
+let volumeInterval = null;
+let processing = false;
+let wasTalking = false;
+let silenceTimer = null;
+let tickTimer = null;
+let totalTicks = 0;
+let pendingCommas = 0;
+let transcriptParts = [];
+
+const VOLUME_THRESHOLD = 10;
+const SILENCE_SECONDS = 2;
+
+function setMicStatus(text) { micStatus.textContent = text; }
+
+function renderPreview() {
+    const text = transcriptParts.join(' ').trim();
+    previewEl.textContent = text;
+    previewEl.style.display = text ? 'block' : 'none';
+}
+
+async function toggleMic() {
+    if (listening) {
+        listening = false;
+        stopMic();
+        micBtn.classList.remove('listening', 'recording');
+        setMicStatus('Mic off');
+        return;
+    }
+    try {
+        audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
+        transcriptParts = [];
+        pendingCommas = 0;
+        wasTalking = false;
+        renderPreview();
+        startNewClip();
+        startVolumeMonitor();
+        listening = true;
+        micBtn.classList.add('listening');
+        setMicStatus('Listening... say "go ahead" to send');
+    } catch (e) {
+        setMicStatus('Mic access denied');
+    }
+}
+
+function stopMic() {
+    if (volumeInterval) { clearInterval(volumeInterval); volumeInterval = null; }
+    if (audioContext) { audioContext.close(); audioContext = null; }
+    analyser = null;
+    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+    if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+    if (clipRecorder && clipRecorder.state === 'recording') {
+        try { clipRecorder.stop(); } catch (e) {}
+    }
+    clipRecorder = null;
+    clipChunks = [];
+    transcriptParts = [];
+    pendingCommas = 0;
+    renderPreview();
+    if (audioStream) {
+        audioStream.getTracks().forEach(t => t.stop());
+        audioStream = null;
+    }
+}
+
+function startNewClip() {
+    if (clipRecorder && clipRecorder.state === 'recording') {
+        try { clipRecorder.stop(); } catch (e) {}
+    }
+    if (!audioStream) return;
+    clipChunks = [];
+    clipHadSpeech = false;
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+    clipRecorder = new MediaRecorder(audioStream, {mimeType});
+    clipRecorder.ondataavailable = (e) => { if (e.data.size > 0) clipChunks.push(e.data); };
+    clipRecorder.start();
+}
+
+async function startVolumeMonitor() {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === 'suspended') await audioContext.resume();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    audioContext.createMediaStreamSource(audioStream).connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    volumeInterval = setInterval(() => {
+        if (processing) return;
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+
+        if (avg > VOLUME_THRESHOLD) {
+            micBtn.classList.add('recording');
+            setMicStatus('🎙 ' + Math.round(avg) + ' dB');
+            wasTalking = true;
+            clipHadSpeech = true;
+            if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+            if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+            totalTicks = 0;
+        } else {
+            micBtn.classList.remove('recording');
+            if (listening) micBtn.classList.add('listening');
+            if (!tickTimer) {
+                totalTicks = 0;
+                tickTimer = setInterval(() => {
+                    totalTicks++;
+                    pendingCommas++;
+                    setMicStatus(', '.repeat(totalTicks).trim());
+                }, 1000);
+            }
+            if (wasTalking && !silenceTimer) {
+                silenceTimer = setTimeout(() => {
+                    silenceTimer = null;
+                    wasTalking = false;
+                    checkClip();
+                }, SILENCE_SECONDS * 1000);
+            }
+        }
+    }, 100);
+}
+
+async function checkClip() {
+    if (processing) return;
+    processing = true;
+
+    if (!clipHadSpeech) {
+        processing = false;
+        if (listening) startNewClip();
+        return;
+    }
+    if (clipRecorder && clipRecorder.state === 'recording') {
+        await new Promise(resolve => {
+            clipRecorder.onstop = resolve;
+            clipRecorder.stop();
+        });
+    }
+    if (clipChunks.length === 0) {
+        processing = false;
+        if (listening) startNewClip();
+        return;
+    }
+
+    const mimeType = clipRecorder ? clipRecorder.mimeType : 'audio/webm';
+    const ext = mimeType.includes('webm') ? 'webm' : 'm4a';
+    const blob = new Blob(clipChunks, {type: mimeType});
+    const formData = new FormData();
+    formData.append('audio', blob, `clip.${ext}`);
+
+    try {
+        const res = await fetch('/api/transcribe', {method: 'POST', body: formData});
+        const data = await res.json();
+        if (data.text) {
+            const heard = data.text.trim().toLowerCase();
+            const commaPrefix = pendingCommas > 0 ? ', '.repeat(pendingCommas) : '';
+            pendingCommas = 0;
+            transcriptParts.push(commaPrefix + heard);
+            renderPreview();
+
+            const cleaned = heard.replace(/[^a-z ]/g, '').trim()
+                                 .replace(/\s*thank you\s*$/g, '').trim();
+            // Voice commands: "press enter" / "press escape"
+            if (cleaned.split(/\s+/).length <= 3 && /^press\b/.test(cleaned)) {
+                transcriptParts.pop();
+                renderPreview();
+                const key = /esc/.test(cleaned) ? 'Escape' : (/ent|int|cent/.test(cleaned) ? 'Enter' : null);
+                if (key) {
+                    setMicStatus('press ' + key.toLowerCase());
+                    fetch('/api/key', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({key}),
+                    });
+                    processing = false;
+                    if (listening) startNewClip();
+                    return;
+                }
+            }
+
+            const goAhead = cleaned.match(/\bgo\s+ahead\b/);
+            if (goAhead) {
+                const idx = cleaned.indexOf(goAhead[0]);
+                const before = cleaned.substring(0, idx).trim();
+                if (before) transcriptParts[transcriptParts.length - 1] = before;
+                else transcriptParts.pop();
+                await sendVoiceTranscript();
+            }
+        }
+    } catch (e) {
+        setMicStatus('Transcribe error');
+    }
+
+    processing = false;
+    if (listening) startNewClip();
+}
+
+async function sendVoiceTranscript() {
+    let text = transcriptParts.join(' ').trim().replace(/[,\s]+$/, '').trim();
+    transcriptParts = [];
+    pendingCommas = 0;
+    renderPreview();
+    if (!text) { setMicStatus('Nothing to send'); return; }
+    setMicStatus('Sending...');
+    try {
+        const res = await fetch('/api/voice-text', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text}),
+        });
+        const data = await res.json();
+        if (data.busy) {
+            showToast(data.routed + ' is still working — wait for a still point.');
+            setMicStatus('');
+        } else if (data.routed) {
+            setMicStatus('Sent to ' + data.routed);
+        } else {
+            setMicStatus('Sent');
+        }
+    } catch (e) {
+        setMicStatus('Send error');
+    }
+}
+
+pollFeed();
+setInterval(pollFeed, 3000);
+</script>
+</body>
+</html>

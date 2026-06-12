@@ -17,6 +17,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_MODEL = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
+ALLOWED_LANGUAGES = {"en", "es", "english", "spanish"}
 
 
 class TranscriptionUnavailable(RuntimeError):
@@ -36,11 +37,15 @@ def transcribe_audio(audio_bytes: bytes, filename: str = "memo.m4a") -> str:
                 GROQ_URL,
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
                 files={"file": (filename, audio_bytes, "application/octet-stream")},
-                data={"model": GROQ_MODEL, "response_format": "text", "language": "en"},
+                data={"model": GROQ_MODEL, "response_format": "verbose_json"},
                 timeout=30,
             )
             response.raise_for_status()
-            return response.text.strip()
+            result = response.json()
+            detected = (result.get("language") or "").strip().lower()
+            if detected and detected not in ALLOWED_LANGUAGES:
+                return ""  # background noise / non-target language — discard
+            return (result.get("text") or "").strip()
         except (requests.exceptions.ConnectionError, requests.exceptions.SSLError, ConnectionError, OSError):
             if attempt == 2:
                 raise

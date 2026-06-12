@@ -4,14 +4,15 @@ Embeds ttyd terminal in an iframe. Adds voice input (browser speech recognition)
 and voice output (gTTS from transcript JSONL).
 """
 
+import hashlib
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 from datetime import datetime
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -76,11 +77,20 @@ def _save_sessions():
 
 
 SESSIONS = _load_sessions()
+# Ensure every session has a last_used timestamp
+for _s in SESSIONS:
+    _s.setdefault("last_used", None)
 _active_session = SESSIONS[0]
 
 
 def get_session():
     return _active_session
+
+
+def _touch_session(session):
+    """Update last_used timestamp for a session."""
+    session["last_used"] = datetime.now().isoformat()
+    _save_sessions()
 
 TMUX_SESSION = "claude"  # legacy reference, use get_session()["tmux"] instead
 
@@ -371,7 +381,7 @@ VOICE_COMMANDS = {
 _last_text = None
 
 def send_to_claude(text):
-    """Send keystrokes to the active tmux session."""
+    """Send keystrokes to the active tmux session. No shell — argument lists only."""
     global _last_text
     _last_text = text
     tmux = get_session()["tmux"]
@@ -379,14 +389,18 @@ def send_to_claude(text):
     key = VOICE_COMMANDS.get(cmd)
     if key:
         result = subprocess.run(
-            ["wsl", "bash", "-c", f"tmux send-keys -t {tmux} {key}"],
+            ["wsl", "tmux", "send-keys", "-t", tmux, *key.split()],
             capture_output=True, timeout=15,
         )
         logging.info(f"KEY cmd='{cmd}' session={tmux} rc={result.returncode} err={result.stderr.decode().strip()}")
     else:
-        escaped = text.replace("'", "'\\''")
+        # -l = literal text, -- stops option parsing; then Enter as a separate key
         result = subprocess.run(
-            ["wsl", "bash", "-c", f"tmux send-keys -t {tmux} '{escaped}' Enter"],
+            ["wsl", "tmux", "send-keys", "-t", tmux, "-l", "--", text],
+            capture_output=True, timeout=15,
+        )
+        subprocess.run(
+            ["wsl", "tmux", "send-keys", "-t", tmux, "Enter"],
             capture_output=True, timeout=15,
         )
         logging.info(f"SEND text='{text[:80]}' session={tmux} rc={result.returncode} err={result.stderr.decode().strip()}")
@@ -400,14 +414,91 @@ def index():
     return resp
 
 
+@app.route("/talk")
+def talk():
+    """Chat-first view: session status feed + question queue, no terminal."""
+    resp = make_response(render_template("talk.html", session=_active_session))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
+
+
 @app.route("/blink")
 def blink():
     return redirect("https://blink.tradingdata.net")
 
 
+def _pane_info():
+    """Return {tmux_session: {"cmd": ..., "path": ...}} for all sessions in one tmux call."""
+    try:
+        result = subprocess.run(
+            ["wsl", "tmux", "list-panes", "-a", "-F",
+             "#{session_name}\t#{pane_current_command}\t#{pane_current_path}"],
+            capture_output=True, timeout=10, text=True,
+        )
+        if result.returncode != 0:
+            return {}
+        out = {}
+        for line in result.stdout.strip().splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3:
+                out[parts[0]] = {"cmd": parts[1], "path": parts[2]}
+        return out
+    except Exception:
+        return {}
+
+
+def _pane_commands():
+    """Return {tmux_session: current_command} for all sessions."""
+    return {k: v["cmd"] for k, v in _pane_info().items()}
+
+
+_SHELLS = {"bash", "sh", "zsh", "fish", "dash"}
+
+
 @app.route("/api/sessions")
 def api_sessions():
-    return jsonify({"sessions": SESSIONS, "active": _active_session["id"]})
+    cmds = _pane_commands()
+    feed = {f["id"]: f for f in _feed_state["sessions"]}
+    out = []
+    for s in SESSIONS:
+        d = dict(s)
+        cmd = cmds.get(s["tmux"])
+        d["running"] = cmd
+        d["alive"] = bool(cmd) and cmd not in _SHELLS
+        d["small"] = feed.get(s["id"], {}).get("small", "")
+        d["status"] = feed.get(s["id"], {}).get("status", "")
+        out.append(d)
+    return jsonify({"sessions": out, "active": _active_session["id"]})
+
+
+LAUNCH_COMMANDS = {
+    "claude": "claude --model claude-opus-4-6 --effort medium",
+    "gemini": "gemini",
+    "chatgpt": "codex",
+}
+
+
+@app.route("/api/session/launch", methods=["POST"])
+def launch_session():
+    """Kill whatever runs in a session's pane and launch a fresh CLI."""
+    data = request.get_json()
+    sid = data.get("id", "")
+    cli = data.get("cli", "")
+    cmd = LAUNCH_COMMANDS.get(cli)
+    if not cmd:
+        return jsonify({"error": "Unknown cli"}), 400
+    for s in SESSIONS:
+        if s["id"] == sid:
+            tmux = s["tmux"]
+            subprocess.run(["wsl", "tmux", "respawn-pane", "-k", "-t", tmux],
+                           capture_output=True, timeout=15)
+            time.sleep(0.5)
+            subprocess.run(["wsl", "tmux", "send-keys", "-t", tmux,
+                            f"cd /mnt/c/dev && {cmd}", "Enter"],
+                           capture_output=True, timeout=15)
+            logging.info(f"LAUNCH {cli} in {tmux} ({cmd})")
+            return jsonify({"ok": True, "cmd": cmd})
+    return jsonify({"error": "Unknown session"}), 400
 
 
 @app.route("/api/session", methods=["POST"])
@@ -418,6 +509,7 @@ def set_session():
     for s in SESSIONS:
         if s["id"] == sid:
             _active_session = s
+            _touch_session(s)
             lock_transcript(s)
             logging.info(f"SESSION_SWITCH to {s['name']} (tmux={s['tmux']})")
             return jsonify({"ok": True, "session": s})
@@ -434,22 +526,107 @@ def rename_session():
     for s in SESSIONS:
         if s["id"] == sid:
             s["name"] = name
+            s["custom_name"] = True  # manual rename wins — auto-rename leaves it alone
             _save_sessions()
             logging.info(f"SESSION_RENAME {sid} -> {name}")
             return jsonify({"ok": True, "session": s})
     return jsonify({"error": "Unknown session"}), 400
 
 
+TAB_DEFAULTS = {"dev": "1", "nimbus": "2", "alpha": "3",
+                "bravo": "4", "charlie": "5", "delta": "6"}
+
+# How to start a fresh conversation per CLI (by pane_current_command)
+RESET_COMMANDS = {"claude": "/new", "codex": "/new", "gemini": "/clear", "node": "/clear"}
+
+
+@app.route("/api/session/hide", methods=["POST"])
+def hide_session():
+    """Hide a session: drop from feed, reset name to its number, reset the conversation."""
+    data = request.get_json()
+    sid = data.get("id", "")
+    hidden = bool(data.get("hidden", True))
+    for s in SESSIONS:
+        if s["id"] == sid:
+            s["hidden"] = hidden
+            if hidden:
+                s["name"] = TAB_DEFAULTS.get(sid, s["name"])
+                s.pop("custom_name", None)
+                _folder_cache.pop(sid, None)
+                _big_cache.pop(sid, None)
+                cmd = _pane_commands().get(s["tmux"], "")
+                reset = RESET_COMMANDS.get(cmd)
+                if reset:
+                    subprocess.run(["wsl", "tmux", "send-keys", "-t", s["tmux"], "-l", "--", reset],
+                                   capture_output=True, timeout=15)
+                    time.sleep(0.5)
+                    subprocess.run(["wsl", "tmux", "send-keys", "-t", s["tmux"], "Enter"],
+                                   capture_output=True, timeout=15)
+                logging.info(f"SESSION_HIDE {sid} reset='{reset}' cmd='{cmd}'")
+            else:
+                logging.info(f"SESSION_UNHIDE {sid}")
+            _save_sessions()
+            return jsonify({"ok": True, "session": s})
+    return jsonify({"error": "Unknown session"}), 400
+
+
+@app.route("/api/session/topic", methods=["GET"])
+def session_topic():
+    """Extract a short topic label from the active tmux screen content."""
+    import re
+    raw = _capture_pane()
+    if not raw:
+        return jsonify({"topic": None})
+
+    lines = [l.strip() for l in raw.splitlines() if l.strip()]
+    if not lines:
+        return jsonify({"topic": None})
+
+    # Strategy 1: Look for project path in Claude Code prompt (e.g. "/mnt/c/dev/spark")
+    for line in reversed(lines[-20:]):
+        m = re.search(r'/(?:mnt/c/)?dev/(\w+)', line)
+        if m:
+            project = m.group(1)
+            return jsonify({"topic": project})
+
+    # Strategy 2: Look for "C:/dev/project" or "C:\dev\project" Windows paths
+    for line in reversed(lines[-20:]):
+        m = re.search(r'[Cc]:[/\\]dev[/\\](\w+)', line)
+        if m:
+            return jsonify({"topic": m.group(1)})
+
+    # Strategy 3: Use first meaningful words from the last non-empty content
+    # Skip common noise lines
+    noise = re.compile(r'^(\$|>|#|claude|tokens|Running|Press|Allow|Deny|─|━|⎿|●|✻)', re.I)
+    content_lines = [l for l in lines[-10:] if not noise.match(l)]
+    if content_lines:
+        # Take last meaningful line, truncate to ~20 chars
+        last = content_lines[-1][:30].strip()
+        # Remove special chars
+        last = re.sub(r'[^\w\s]', '', last).strip()
+        words = last.split()[:3]
+        if words:
+            return jsonify({"topic": " ".join(words)})
+
+    return jsonify({"topic": None})
+
+
+ALLOWED_KEYS = {
+    "Enter", "Escape", "Tab", "BTab", "Up", "Down", "Left", "Right",
+    "Space", "PageUp", "PageDown", "C-c", "C-z", "C-d",
+}
+
+
 @app.route("/api/key", methods=["POST"])
 def key():
-    """Send a raw key to the tmux session."""
+    """Send a named key to the tmux session. Allowlisted keys only."""
     data = request.get_json()
     k = (data.get("key") or "").strip()
-    if not k:
-        return jsonify({"error": "No key"}), 400
+    if k not in ALLOWED_KEYS:
+        return jsonify({"error": "Key not allowed"}), 400
     tmux = get_session()["tmux"]
     subprocess.run(
-        ["wsl", "bash", "-c", f"tmux send-keys -t {tmux} {k}"],
+        ["wsl", "tmux", "send-keys", "-t", tmux, k],
         capture_output=True, timeout=15,
     )
     return jsonify({"ok": True})
@@ -462,11 +639,11 @@ def scroll():
     direction = data.get("direction", "up")  # "up" or "down"
     tmux = get_session()["tmux"]
     if direction == "up":
-        cmd = f"tmux copy-mode -t {tmux} 2>/dev/null; tmux send-keys -t {tmux} -X page-up 2>/dev/null"
+        subprocess.run(["wsl", "tmux", "copy-mode", "-t", tmux], capture_output=True, timeout=15)
+        subprocess.run(["wsl", "tmux", "send-keys", "-t", tmux, "-X", "page-up"], capture_output=True, timeout=15)
     else:
         # Exit copy-mode entirely so terminal snaps back to live input
-        cmd = f"tmux copy-mode -q -t {tmux} 2>/dev/null"
-    subprocess.run(["wsl", "bash", "-c", cmd], capture_output=True, timeout=15)
+        subprocess.run(["wsl", "tmux", "copy-mode", "-q", "-t", tmux], capture_output=True, timeout=15)
     return jsonify({"ok": True})
 
 
@@ -480,6 +657,21 @@ def retry():
     return jsonify({"ok": True, "text": _last_text})
 
 
+HEY_RE = re.compile(r'^hey[\s,]+(\w+)[\s,.!]+(.+)$', re.IGNORECASE | re.DOTALL)
+
+
+def _match_hey(text):
+    """Parse 'hey <session> <message>' — returns (session, message) or (None, None)."""
+    m = HEY_RE.match(text.strip())
+    if not m:
+        return None, None
+    name, message = m.group(1).lower(), m.group(2).strip()
+    for s in SESSIONS:
+        if s["name"].lower() == name or s["name"].lower().startswith(name):
+            return s, message
+    return None, None
+
+
 @app.route("/api/voice-text", methods=["POST"])
 def voice_text():
     """Receive already-transcribed text, send to claude."""
@@ -487,6 +679,23 @@ def voice_text():
     text = (data.get("text") or "").strip()
     if not text:
         return jsonify({"error": "No text"}), 400
+
+    # "hey alpha ..." routes to that session — only at a still point
+    target, message = _match_hey(text)
+    if target and message:
+        status = next((x["status"] for x in _feed_state["sessions"]
+                       if x["id"] == target["id"]), "unknown")
+        if status == "working":
+            logging.info(f"HEY_BUSY {target['name']} text='{message[:60]}'")
+            return jsonify({"ok": False, "busy": True, "routed": target["name"]})
+        tmux = target["tmux"]
+        subprocess.run(["wsl", "tmux", "send-keys", "-t", tmux, "-l", "--", message],
+                       capture_output=True, timeout=15)
+        subprocess.run(["wsl", "tmux", "send-keys", "-t", tmux, "Enter"],
+                       capture_output=True, timeout=15)
+        logging.info(f"HEY_SEND {target['name']} text='{message[:60]}'")
+        return jsonify({"ok": True, "routed": target["name"], "input": message})
+
     send_to_claude(text)
     append_summary(text, is_assistant=False)
     # Summarize user input for clean transcript
@@ -550,7 +759,7 @@ def screen():
     """Capture the tmux pane and check for prompts."""
     try:
         result = subprocess.run(
-            ["wsl", "bash", "-c", f"tmux capture-pane -t {get_session()['tmux']} -p"],
+            ["wsl", "tmux", "capture-pane", "-t", get_session()["tmux"], "-p"],
             capture_output=True, timeout=15, text=True,
         )
         text = result.stdout.strip()
@@ -566,13 +775,12 @@ def screen():
         return jsonify({"waiting": False, "tail": [], "error": str(e)})
 
 
-@app.route("/api/screen-status")
-def screen_status():
-    """Return Claude's current state: working, idle, or asking a question."""
+def _screen_status_data():
+    """Claude's current state: working, idle, or asking a question."""
     import re
     raw = _capture_pane()
     if not raw:
-        return jsonify({"status": "unknown"})
+        return {"status": "unknown"}
 
     lines = raw.strip().splitlines()
     last_lines = "\n".join(lines[-10:]) if lines else ""
@@ -586,7 +794,7 @@ def screen_status():
     )
     if question_patterns.search(last_lines):
         q_lines = [l.strip() for l in lines[-8:] if l.strip()]
-        return jsonify({"status": "question", "text": "\n".join(q_lines)})
+        return {"status": "question", "text": "\n".join(q_lines)}
 
     # Check for working indicators
     working_patterns = re.compile(
@@ -595,9 +803,14 @@ def screen_status():
         re.IGNORECASE
     )
     if working_patterns.search(last_lines):
-        return jsonify({"status": "working"})
+        return {"status": "working"}
 
-    return jsonify({"status": "idle"})
+    return {"status": "idle"}
+
+
+@app.route("/api/screen-status")
+def screen_status():
+    return jsonify(_screen_status_data())
 
 
 def _capture_pane():
@@ -613,8 +826,312 @@ def _capture_pane():
         return ""
 
 
-@app.route("/api/screen-latest")
-def screen_latest():
+# --- Multi-session question queue ---
+
+QUESTION_RE = re.compile(
+    r'(1\.\s*Yes|2\.\s*Yes|3\.\s*No|Do you want to proceed'
+    r'|Allow|Deny|y/n|Y/n|yes/no|\(Y/n\)|\(y/n\)'
+    r'|Press Enter|Continue\?|proceed\?|approve)',
+    re.IGNORECASE
+)
+
+WORKING_RE = re.compile(
+    r'(Running|Flibbert|thinking|Searching|Reading|Writing|Editing'
+    r'|tokens|◐|◑|◒|◓|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|✻|\*.*…|esc to interrupt)',
+    re.IGNORECASE
+)
+
+_recently_answered = {}  # question hash -> time answered (suppress until screen updates)
+ANSWERED_TTL = 90  # seconds
+
+
+def _capture_all_panes(tail=14):
+    """Capture the last lines of every session's pane in one wsl call."""
+    parts = []
+    for s in SESSIONS:
+        n = s["tmux"]
+        parts.append(f'echo "===={n}===="; tmux capture-pane -t {n} -p 2>/dev/null | tail -n {tail}')
+    script = "; ".join(parts)
+    try:
+        result = subprocess.run(
+            ["wsl", "bash", "-c", script],
+            capture_output=True, timeout=15, encoding="utf-8", errors="replace",
+        )
+    except Exception:
+        return {}
+    panes = {}
+    current = None
+    for line in (result.stdout or "").splitlines():
+        m = re.match(r'^====(\S+)====$', line)
+        if m:
+            current = m.group(1)
+            panes[current] = []
+        elif current is not None:
+            panes[current].append(line)
+    return {k: "\n".join(v) for k, v in panes.items()}
+
+
+def _scan_sessions():
+    """Scan every session's pane: status (question/working/idle) + open questions."""
+    now = time.time()
+    for h, t in list(_recently_answered.items()):
+        if now - t > ANSWERED_TTL:
+            del _recently_answered[h]
+
+    panes = _capture_all_panes()
+    statuses = []
+    questions = []
+    for s in SESSIONS:
+        text = panes.get(s["tmux"], "")
+        lines = [l for l in text.splitlines() if l.strip()]
+        status = "unknown"
+        if lines:
+            last_lines = "\n".join(lines[-10:])
+            if QUESTION_RE.search(last_lines):
+                q_text = "\n".join(l.strip() for l in lines[-8:])
+                h = hashlib.md5((s["id"] + q_text).encode("utf-8")).hexdigest()[:12]
+                if h in _recently_answered:
+                    status = "working"  # just answered, screen still settling
+                else:
+                    status = "question"
+                    questions.append({"id": s["id"], "name": s["name"], "text": q_text, "hash": h})
+            elif WORKING_RE.search(last_lines):
+                status = "working"
+            else:
+                status = "idle"
+        statuses.append({"id": s["id"], "name": s["name"], "status": status})
+    return statuses, questions
+
+
+@app.route("/api/questions")
+def api_questions():
+    statuses, questions = _scan_sessions()
+    return jsonify({"questions": questions, "sessions": statuses})
+
+
+# --- Live feed: big/small status per session, refreshed by background thread ---
+
+_feed_state = {"sessions": [], "questions": [], "ts": 0}
+_big_cache = {}  # sid -> {"big": str, "ts": float, "hash": str}
+BIG_REFRESH_SECONDS = 60
+
+SMALL_TOOL_RE = re.compile(r'\b(Bash|Read|Edit|Write|Grep|Glob|Agent)\(([^)]{0,60})')
+FOLDER_RE = re.compile(r'(?:/mnt/c/dev/|[Cc]:[/\\]dev[/\\])([A-Za-z_]\w*)')
+
+TOOL_VERBS = {
+    "Bash": "running", "Read": "reading", "Edit": "editing", "Write": "writing",
+    "Grep": "searching", "Glob": "searching", "Agent": "delegating",
+}
+
+
+_folder_cache = {}  # sid -> last non-empty folder list
+
+
+def _derive_folders(sid, text):
+    """Project folders this session is touching, most frequent first. Sticky.
+
+    Frequency beats recency so a stray quoted path (e.g. another session's
+    output shown on this screen) doesn't displace the folder actually in use.
+    """
+    counts = {}
+    match_lines = []
+    for line in text.splitlines():
+        for m in FOLDER_RE.finditer(line):
+            f = m.group(1).lower()
+            counts[f] = counts.get(f, 0) + 1
+            match_lines.append(line.strip()[:110])
+    # Need 2+ mentions: one stray quoted path can't flip the card
+    seen = sorted((f for f in counts if counts[f] >= 2),
+                  key=lambda f: counts[f], reverse=True)[:3]
+    if seen:
+        if seen != _folder_cache.get(sid):
+            logging.info(f"FOLDERS {sid} counts={counts} -> {seen} lines={match_lines[:4]}")
+        _folder_cache[sid] = seen
+        return seen, True  # fresh sighting
+    return _folder_cache.get(sid, []), False  # cached only
+
+
+def _derive_small(lines, status, q_text=""):
+    """Short, fast-changing status line — what's happening right now."""
+    if status == "question":
+        first = q_text.splitlines()[0].strip() if q_text else ""
+        return f"asking: {first[:70]}" if first else "asking a question"
+    if status == "idle":
+        return "idle — waiting for you"
+    for l in reversed(lines):
+        m = SMALL_TOOL_RE.search(l)
+        if m:
+            name, arg = m.group(1), m.group(2).strip()
+            verb = TOOL_VERBS.get(name, name.lower())
+            return f"{verb}: {arg}" if arg else verb
+    return "working"
+
+
+def _refresh_big(sid, content):
+    """Slow-changing one-line summary of what the session is working on."""
+    h = hashlib.md5(content.encode("utf-8")).hexdigest()
+    cache = _big_cache.setdefault(sid, {"big": "", "ts": 0, "hash": ""})
+    now = time.time()
+    if cache["big"] and (now - cache["ts"] < BIG_REFRESH_SECONDS or cache["hash"] == h):
+        return cache["big"]
+    try:
+        from summarize import ask
+        big = ask(
+            prompt=f"This is a terminal screen from a Claude Code session. In 1-2 short sentences, what is this session working on overall — the bigger goal, not the current step? Plain words, present tense, first person plural (we).\n\n{content[-2500:]}",
+            system="Output only the sentences. Under 30 words total. No preamble.",
+        )
+        if big and len(big.strip()) > 3:
+            cache.update({"big": big.strip(), "ts": now, "hash": h})
+    except Exception:
+        pass
+    return cache["big"]
+
+
+_CWD_FOLDER_RE = re.compile(r'^/mnt/c/dev/([A-Za-z_]\w*)', re.IGNORECASE)
+
+
+def _cwd_folder(path):
+    """Project folder from a pane's working directory ('' if at dev root or elsewhere)."""
+    m = _CWD_FOLDER_RE.match(path or "")
+    return m.group(1).lower() if m else ""
+
+
+def _maybe_autorename(session, folder):
+    """Name the tab after the folder the session is working in. Manual rename wins."""
+    if not folder or session.get("custom_name"):
+        return
+    if session["name"].lower() != folder:
+        session["name"] = folder
+        _save_sessions()
+        logging.info(f"SESSION_AUTORENAME {session['id']} -> {folder}")
+
+
+def _feed_loop():
+    """Background scanner: keeps _feed_state fresh so /api/feed is instant."""
+    while True:
+        try:
+            info = _pane_info()
+            panes = _capture_all_panes(tail=80)
+            now = time.time()
+            for h, t in list(_recently_answered.items()):
+                if now - t > ANSWERED_TTL:
+                    del _recently_answered[h]
+            sessions_out = []
+            questions = []
+            for s in SESSIONS:
+                if s.get("hidden"):
+                    continue
+                pane = info.get(s["tmux"], {})
+                cmd = pane.get("cmd")
+                alive = bool(cmd) and cmd not in _SHELLS
+                text = panes.get(s["tmux"], "")
+                lines = [l for l in text.splitlines() if l.strip()]
+                if not alive or not lines:
+                    sessions_out.append({"id": s["id"], "name": s["name"],
+                                         "status": "inactive", "big": "", "small": "inactive",
+                                         "folders": []})
+                    continue
+                last_lines = "\n".join(lines[-10:])
+                q_text = ""
+                if QUESTION_RE.search(last_lines):
+                    q_text = "\n".join(l.strip() for l in lines[-8:])
+                    qh = hashlib.md5((s["id"] + q_text).encode("utf-8")).hexdigest()[:12]
+                    if qh in _recently_answered:
+                        status = "working"
+                    else:
+                        status = "question"
+                        questions.append({"id": s["id"], "name": s["name"],
+                                          "text": q_text, "hash": qh})
+                elif WORKING_RE.search(last_lines):
+                    status = "working"
+                else:
+                    status = "idle"
+                big = _refresh_big(s["id"], "\n".join(lines))
+                small = _derive_small(lines, status, q_text)
+                folders, fresh = _derive_folders(s["id"], text)
+                # Pane working directory is the truth; screen sightings are the fallback
+                cwd = _cwd_folder(pane.get("path"))
+                if cwd:
+                    folders = [cwd] + [f for f in folders if f != cwd]
+                _maybe_autorename(s, cwd or (folders[0] if fresh and folders else ""))
+                sessions_out.append({"id": s["id"], "name": s["name"],
+                                     "status": status, "big": big, "small": small,
+                                     "folders": folders})
+            _feed_state.update({"sessions": sessions_out, "questions": questions, "ts": now})
+        except Exception as e:
+            logging.info(f"FEED_ERR {e}")
+        time.sleep(5)
+
+
+@app.route("/api/feed")
+def api_feed():
+    return jsonify(_feed_state)
+
+
+@app.route("/api/send", methods=["POST"])
+def api_send():
+    """Send a new prompt to a specific session — only if it's at a still point."""
+    data = request.get_json()
+    sid = data.get("id", "")
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "No text"}), 400
+    session = next((s for s in SESSIONS if s["id"] == sid), None)
+    if not session:
+        return jsonify({"error": "Unknown session"}), 400
+    # Use the live feed state if fresh, otherwise scan now
+    if time.time() - _feed_state["ts"] < 15 and _feed_state["sessions"]:
+        statuses = _feed_state["sessions"]
+    else:
+        statuses, _ = _scan_sessions()
+    status = next((x["status"] for x in statuses if x["id"] == sid), "unknown")
+    if status == "working":
+        return jsonify({"error": "busy", "status": status}), 409
+    tmux = session["tmux"]
+    subprocess.run(["wsl", "tmux", "send-keys", "-t", tmux, "-l", "--", text],
+                   capture_output=True, timeout=15)
+    subprocess.run(["wsl", "tmux", "send-keys", "-t", tmux, "Enter"],
+                   capture_output=True, timeout=15)
+    logging.info(f"FEED_SEND {sid} ({status}) text='{text[:60]}'")
+    return jsonify({"ok": True, "status": status})
+
+
+QUEUE_KEYS = {"1", "2", "3", "Enter", "Escape", "Tab"}
+
+
+@app.route("/api/questions/answer", methods=["POST"])
+def answer_question():
+    """Send an answer (key or text) to a specific session's tmux pane."""
+    data = request.get_json()
+    sid = data.get("id", "")
+    h = data.get("hash", "")
+    key = (data.get("key") or "").strip()
+    text = (data.get("text") or "").strip()
+    session = next((s for s in SESSIONS if s["id"] == sid), None)
+    if not session:
+        return jsonify({"error": "Unknown session"}), 400
+    tmux = session["tmux"]
+    if key:
+        if key not in QUEUE_KEYS:
+            return jsonify({"error": "Key not allowed"}), 400
+        keys = [key, "Enter"] if key in {"1", "2", "3"} else [key]
+        for k in keys:
+            subprocess.run(["wsl", "tmux", "send-keys", "-t", tmux, k],
+                           capture_output=True, timeout=15)
+    elif text:
+        subprocess.run(["wsl", "tmux", "send-keys", "-t", tmux, "-l", "--", text],
+                       capture_output=True, timeout=15)
+        subprocess.run(["wsl", "tmux", "send-keys", "-t", tmux, "Enter"],
+                       capture_output=True, timeout=15)
+    else:
+        return jsonify({"error": "No answer"}), 400
+    if h:
+        _recently_answered[h] = time.time()
+    logging.info(f"QUEUE_ANSWER {sid} key='{key}' text='{text[:60]}'")
+    return jsonify({"ok": True})
+
+
+def _screen_latest_data():
     """Poll-based idle detection + screen capture for TTS.
 
     Returns new content only when the screen has stopped changing.
@@ -628,7 +1145,7 @@ def screen_latest():
 
     raw_content = _capture_pane()
     if not raw_content:
-        return jsonify({"text": None, "hash": None, "status": "no_content"})
+        return {"text": None, "hash": None, "status": "no_content"}
 
     # Strip spinners/status for stable hash detection
     import re
@@ -641,7 +1158,7 @@ def screen_latest():
     content = "\n".join(content_lines)
 
     if not content.strip():
-        return jsonify({"text": None, "hash": None, "status": "no_content"})
+        return {"text": None, "hash": None, "status": "no_content"}
 
     # Hash only the stable content
     h = hashlib.md5(content.encode()).hexdigest()
@@ -655,7 +1172,7 @@ def screen_latest():
         state["hash"] = h
         state["stable_count"] = 1
         state["last_content"] = content
-        return jsonify({"text": None, "hash": None, "status": "changing"})
+        return {"text": None, "hash": None, "status": "changing"}
 
     # Check for Claude's input prompt — definitive "done" signal
     raw_lines = [l for l in raw_content.splitlines() if l.strip()]
@@ -664,7 +1181,7 @@ def screen_latest():
     # If we see the prompt, only need 2 stable polls. Otherwise need full threshold.
     needed = 2 if has_prompt else SCREEN_IDLE_POLLS
     if state["stable_count"] < needed:
-        return jsonify({"text": None, "hash": None, "status": "settling"})
+        return {"text": None, "hash": None, "status": "settling"}
 
     # Grab the last N non-empty lines
     lines = [l for l in content.splitlines() if l.strip()]
@@ -672,11 +1189,11 @@ def screen_latest():
     text = "\n".join(tail)
 
     if not text.strip():
-        return jsonify({"text": None, "hash": h})
+        return {"text": None, "hash": h}
 
     # Compare actual text, not hash — skip if same as last spoken
     if text.strip() == state.get("last_spoken_text", ""):
-        return jsonify({"text": None, "hash": h, "status": "already_spoken"})
+        return {"text": None, "hash": h, "status": "already_spoken"}
 
     # Summarize long output for voice
     spoken = text
@@ -740,7 +1257,61 @@ def screen_latest():
             _append_or_merge_transcript(sid, clean_text)
 
     logging.info(f"SCREEN_LATEST session={sid} lines={len(tail)} chars={len(spoken)}")
-    return jsonify({"text": spoken, "hash": h})
+    return {"text": spoken, "hash": h}
+
+
+@app.route("/api/screen-latest")
+def screen_latest():
+    return jsonify(_screen_latest_data())
+
+
+def _sse(event, data):
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@app.route("/api/events")
+def events():
+    """Server-sent events: pushes status, questions, and speech to the client."""
+    from flask import Response, stream_with_context
+
+    def gen():
+        last_status = None
+        last_question = ""
+        last_speak_hash = ""
+        tick = 0
+        while True:
+            try:
+                status = _screen_status_data()
+                st = status.get("status")
+                if st != last_status:
+                    last_status = st
+                    yield _sse("status", {"status": st})
+                if st == "question":
+                    q = status.get("text", "")
+                    if q and q != last_question:
+                        last_question = q
+                        yield _sse("question", {"text": q})
+
+                # Screen readback check every 3rd tick (~3s, matches old poll rate)
+                if tick % 3 == 0:
+                    data = _screen_latest_data()
+                    if data.get("text") and data.get("hash") != last_speak_hash:
+                        last_speak_hash = data["hash"]
+                        yield _sse("speak", {"text": data["text"], "hash": data["hash"]})
+            except GeneratorExit:
+                raise
+            except Exception as e:
+                logging.info(f"SSE_ERR: {e}")
+
+            if tick % 15 == 0:
+                yield ": keepalive\n\n"
+            tick += 1
+            time.sleep(1)
+
+    resp = Response(stream_with_context(gen()), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
 
 
 @app.route("/api/transcript")
@@ -780,17 +1351,48 @@ def transcribe():
         return jsonify({"error": str(e)}), 500
 
 
+TTS_CACHE_DIR = _SPARK_DIR / "tts_cache"
+TTS_CACHE_DIR.mkdir(exist_ok=True)
+TTS_CACHE_MAX_FILES = 100
+TTS_VOICE = "en-US-AndrewMultilingualNeural"  # natural neural voice, handles EN + ES
+
+
+def _generate_tts(text, path):
+    """Generate speech mp3. edge-tts (neural) first, gTTS fallback."""
+    try:
+        import edge_tts
+        edge_tts.Communicate(text, TTS_VOICE).save_sync(str(path))
+        return
+    except Exception as e:
+        logging.info(f"TTS edge-tts failed ({e}), falling back to gTTS")
+    gTTS(text=text, lang="en", slow=False).save(str(path))
+
+
+def _prune_tts_cache():
+    """Keep only the most recent TTS files."""
+    files = sorted(TTS_CACHE_DIR.glob("*.mp3"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for old in files[TTS_CACHE_MAX_FILES:]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+
 @app.route("/api/tts", methods=["POST"])
 def tts():
-    """Convert text to speech, return MP3."""
+    """Convert text to speech, return MP3. Cached by text hash."""
+    import hashlib
     data = request.get_json()
     text = (data.get("text") or "").strip()
     if not text:
         return jsonify({"error": "No text"}), 400
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-    gTTS(text=text, lang="en", slow=False).save(tmp.name)
-    return send_file(tmp.name, mimetype="audio/mpeg", as_attachment=False)
+    h = hashlib.md5(text.encode("utf-8")).hexdigest()
+    mp3 = TTS_CACHE_DIR / f"{h}.mp3"
+    if not mp3.exists():
+        _generate_tts(text, mp3)
+        _prune_tts_cache()
+    return send_file(str(mp3), mimetype="audio/mpeg", as_attachment=False)
 
 
 @app.route("/api/log", methods=["POST"])
@@ -896,8 +1498,10 @@ def _handle_sigint(sig, frame):
     print("\n[Spark] Ctrl+C again to force quit.")
 
 if __name__ == "__main__":
+    import threading
     signal.signal(signal.SIGINT, _handle_sigint)
     _kill_port(PORT)
+    threading.Thread(target=_feed_loop, daemon=True).start()
     print(f"[Spark] Voice layer on port {PORT}")
     print(f"[Spark] tmux session: {TMUX_SESSION}")
     app.run(host=HOST, port=PORT, debug=False)

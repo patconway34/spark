@@ -71,6 +71,26 @@
         .key-btn:active {
             background: #5a5a8e;
         }
+        .big-btn {
+            height: 54px;
+            flex: 1;
+            border: 1px solid #3a3a5e;
+            border-radius: 12px;
+            background: #2a2a4e;
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 600;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        .big-btn:active {
+            filter: brightness(1.5);
+        }
         .bar-btn {
             width: 40px;
             height: 40px;
@@ -81,6 +101,14 @@
             justify-content: center;
             cursor: pointer;
             flex-shrink: 0;
+        }
+        #send-btn {
+            background: #3498db;
+            color: #fff;
+            transition: background 0.2s;
+        }
+        #send-btn:active {
+            background: #2178b5;
         }
         #mic-btn {
             background: #7b6ba8;
@@ -125,8 +153,8 @@
             color: #fff;
         }
         .tab-btn {
-            height: 32px;
-            padding: 0 12px;
+            min-height: 32px;
+            padding: 3px 12px;
             border: 1px solid #3a3a5e;
             border-radius: 16px;
             background: #2a2a4e;
@@ -145,6 +173,24 @@
             border-color: var(--flame);
             font-weight: 600;
         }
+        .tab-btn.hidden-tab {
+            opacity: 0.5;
+            border-style: dashed;
+        }
+        .tab-sub {
+            font-size: 0.55rem;
+            opacity: 0.75;
+            font-weight: 400;
+            max-width: 110px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .tab-btn.more-btn {
+            background: #1a1a3e;
+            color: #666;
+            font-size: 0.9rem;
+            padding: 0 10px;
+        }
         @keyframes pulse {
             0%, 100% { transform: scale(1); }
             50% { transform: scale(1.1); }
@@ -158,47 +204,54 @@
 <div id="status-bar">Tap mic to start listening</div>
 
 <div id="controls">
+    <!-- Utility row: rarely used, kept small -->
     <div class="key-row">
-        <button class="key-btn" onclick="sendSlashNew()" style="font-size:0.7rem;font-weight:600;letter-spacing:-0.5px;">/new</button>
+        <button class="key-btn" onclick="window.location.href='/talk'" style="font-size:0.65rem;font-weight:600;color:#6ecf9a;">Chat</button>
+        <button class="key-btn" onclick="sendSlashNew()" style="font-size:0.65rem;font-weight:600;letter-spacing:-0.5px;">/new</button>
         <button class="key-btn" onclick="sendKey('BTab')">⇧Tab</button>
         <button class="key-btn" onclick="sendKey('Tab')">Tab</button>
-        <button class="key-btn" onclick="sendKey('Escape')">Esc</button>
-        <button class="key-btn" onclick="sendKey('Enter')">Enter</button>
-    </div>
-    <div class="key-row">
         <button class="key-btn" onclick="sendKey('Up')">&#9650;</button>
         <button class="key-btn" onclick="sendKey('Down')">&#9660;</button>
         <button class="key-btn" onclick="scrollTerminal('up')" style="font-size:0.55rem;">PgUp</button>
         <button class="key-btn" onclick="scrollTerminal('down')" style="font-size:0.55rem;">PgDn</button>
-    </div>
-    <div class="key-row" style="justify-content: center; gap: 0.5rem;">
-        <button id="stop-btn" class="bar-btn" onclick="stopSpeaking()" style="width:34px;height:34px;">
+        <button id="send-btn" class="key-btn" onclick="manualSend()" title="Send transcript">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M2 21l21-9L2 3v7l15 2-15 2z"></path>
+            </svg>
+        </button>
+        <button id="speak-toggle" class="key-btn" onclick="toggleSpeak()" style="font-size:0.85rem;">
+            <span id="speak-icon">🔇</span>
+        </button>
+        <button id="blink-btn" class="key-btn app-btn" onclick="toggleApp('blink')" title="Blink">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </button>
+        <button id="radar-btn" class="key-btn app-btn" onclick="toggleApp('radar')" title="Radar" style="font-size:0.65rem;font-weight:600;">Rdr</button>
+        <button id="marsh-btn" class="key-btn app-btn" onclick="toggleApp('marsh')" title="Marsh files" style="font-size:0.65rem;font-weight:600;">Files</button>
+    </div>
+    <!-- Session tabs -->
+    <div class="key-row" id="tab-bar" style="justify-content: center; gap: 0.3rem; flex-wrap: wrap;">
+        <!-- Tabs rendered dynamically by JS -->
+    </div>
+    <div class="key-row" id="hidden-tabs" style="justify-content: center; gap: 0.3rem; flex-wrap: wrap; display: none;">
+        <!-- Hidden tabs + launcher shown when "+" is clicked -->
+    </div>
+    <!-- Main row: the big three — Esc, Mic, Enter -->
+    <div class="key-row" style="gap: 0.5rem; align-items: center;">
+        <button class="big-btn" onclick="sendKey('Escape')" style="background:#5a2a3a;border-color:#8a4a5a;">Esc</button>
+        <button id="stop-btn" class="bar-btn" onclick="stopSpeaking()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                 <rect x="4" y="4" width="16" height="16" rx="2"></rect>
             </svg>
         </button>
-        <button id="mic-btn" class="bar-btn" onclick="toggleListening()" style="width:34px;height:34px;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button id="mic-btn" class="bar-btn" onclick="toggleListening()" style="width:54px;height:54px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
                 <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                 <line x1="12" y1="19" x2="12" y2="23"></line>
                 <line x1="8" y1="23" x2="16" y2="23"></line>
             </svg>
         </button>
-        <button id="speak-toggle" class="bar-btn" onclick="toggleSpeak()" style="width:34px;height:34px;font-size:0.9rem;">
-            <span id="speak-icon">🔇</span>
-        </button>
-        <button id="blink-btn" class="bar-btn" onclick="toggleBlink()" style="width:34px;height:34px;" title="Blink">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        </button>
-    </div>
-    <div class="key-row" style="justify-content: center; gap: 0.3rem; flex-wrap: wrap;">
-        <button class="tab-btn" onclick="switchSession('dev')" id="tab-dev">1</button>
-        <button class="tab-btn" onclick="switchSession('nimbus')" id="tab-nimbus">2</button>
-        <button class="tab-btn" onclick="switchSession('alpha')" id="tab-alpha">3</button>
-        <button class="tab-btn" onclick="switchSession('bravo')" id="tab-bravo">4</button>
-        <button class="tab-btn" onclick="switchSession('charlie')" id="tab-charlie">5</button>
-        <button class="tab-btn" onclick="switchSession('delta')" id="tab-delta">6</button>
+        <button class="big-btn" onclick="sendKey('Enter')" style="background:#1f4a32;border-color:#3a7a52;">Enter</button>
     </div>
     <div style="height: 100px;"></div>
 </div>
@@ -209,30 +262,35 @@
 window.onbeforeunload = null;
 window.addEventListener('beforeunload', (e) => { delete e.returnValue; });
 
-// --- Blink toggle ---
-let blinkActive = false;
+// --- App view toggle (Blink, Radar, Marsh) ---
+let appView = null;
 let terminalUrl = document.getElementById('terminal').src;
+const APP_URLS = {
+    blink: 'https://blink.tradingdata.net',
+    radar: 'https://radar.tradingdata.net',
+    marsh: 'https://marsh.tradingdata.net',
+};
 
-function toggleBlink() {
+function toggleApp(name) {
     const frame = document.getElementById('terminal');
-    const btn = document.getElementById('blink-btn');
-    if (blinkActive) {
+    document.querySelectorAll('.app-btn').forEach(b => {
+        b.style.background = '';
+        b.style.color = '';
+    });
+    if (appView === name) {
         frame.src = terminalUrl;
-        btn.style.background = '';
-        btn.style.color = '';
-        blinkActive = false;
-    } else {
-        terminalUrl = frame.src;
-        frame.src = 'https://blink.tradingdata.net';
-        btn.style.background = '#2563eb';
-        btn.style.color = '#fff';
-        blinkActive = true;
+        appView = null;
+        return;
     }
+    if (!appView) terminalUrl = frame.src;
+    frame.src = APP_URLS[name];
+    appView = name;
+    const btn = document.getElementById(name + '-btn');
+    if (btn) { btn.style.background = '#2563eb'; btn.style.color = '#fff'; }
 }
 
 let listening = false;
 let speakEnabled = false;
-let lastTranscriptHash = '';
 let currentAudio = null;
 let isSpeaking = false;
 
@@ -314,7 +372,10 @@ function toggleSpeak() {
     speakEnabled = !speakEnabled;
     document.getElementById('speak-icon').textContent = speakEnabled ? '🔊' : '🔇';
     localStorage.setItem('speakEnabled', speakEnabled);
-    if (speakEnabled) pollTranscript();
+    if (!speakEnabled) {
+        speechQueue.length = 0;
+        stopSpeaking();
+    }
 }
 
 function stopSpeaking() {
@@ -502,27 +563,12 @@ function score(a, b) {
 // --- All command targets ---
 function getCommandTargets() {
     return [
-        // Keys
-        {names: ['enter', 'nter', 'inter', 'entr'], act: () => sendKey('Enter'), label: 'enter'},
-        {names: ['tab', 'tabs', 'tap'], act: () => sendKey('Tab'), label: 'tab'},
-        {names: ['shift tab', 'ship tab', 'shift tap'], act: () => sendKey('BTab'), label: 'shift tab'},
-        {names: ['escape', 'scape', 'escap', 'scap'], act: () => sendKey('Escape'), label: 'escape'},
-        {names: ['control c', 'ctrl c', 'control see'], act: () => sendKey('C-c'), label: 'ctrl-c'},
-        {names: ['control z', 'ctrl z', 'control zee'], act: () => sendKey('C-z'), label: 'ctrl-z'},
-        {names: ['control v', 'ctrl v', 'control vee'], act: () => sendKey('C-v'), label: 'ctrl-v'},
-        {names: ['control d', 'ctrl d', 'control dee'], act: () => sendKey('C-d'), label: 'ctrl-d'},
-        {names: ['up', 'app', 'uhp'], act: () => sendKey('Up'), label: 'up'},
-        {names: ['down', 'don', 'doun'], act: () => sendKey('Down'), label: 'down'},
-        {names: ['left', 'lef', 'lift'], act: () => sendKey('Left'), label: 'left'},
-        {names: ['right', 'rite', 'write'], act: () => sendKey('Right'), label: 'right'},
-        {names: ['yes', 'yep', 'yeah', 'yess'], act: () => sendKey('y Enter'), label: 'yes'},
-        {names: ['no', 'nope', 'nah'], act: () => sendKey('n Enter'), label: 'no'},
-        {names: ['one', 'won', 'wan'], act: () => sendKey('1 Enter'), label: '1'},
-        {names: ['two', 'too', 'tu'], act: () => sendKey('2 Enter'), label: '2'},
-        {names: ['three', 'tree', 'free'], act: () => sendKey('3 Enter'), label: '3'},
+        // Voice commands — only enter and escape, everything else is buttons
+        {names: ['press enter', 'press nter', 'press inter', 'press centro'], act: () => sendKey('Enter'), label: 'enter'},
+        {names: ['press escape', 'press scape', 'press escap', 'press a scape'], act: () => sendKey('Escape'), label: 'escape'},
         // Navigation
-        {names: ['main menu', 'main many', 'menu', 'lobby', 'go back', 'go home', 'home'], act: () => { window.location.href = '/'; }, label: 'main menu'},
-        {names: ['clear', 'clair', 'kleer', 'klear'], act: () => {
+        {names: ['go back', 'go home'], act: () => { window.location.href = '/'; }, label: 'main menu'},
+        {names: ['press clear', 'clear recording'], act: () => {
             if (mainRecorder && mainRecorder.state === 'recording') try { mainRecorder.stop(); } catch(e) {}
             mainChunks = [];
             if (listening) startMainRecorder();
@@ -594,61 +640,60 @@ async function checkClipForKeyword() {
             // Strip phantom "thank you" Groq adds from background noise
             const cleaned = heard.replace(/[^a-z ]/g, '').trim().replace(/\s*thank you\s*$/g, '').trim();
             const words = cleaned.split(/\s+/);
-            const lastThree = words.slice(-3);
-            let nowIdx = lastThree.lastIndexOf('now');
-            // Treat "no" as "now" if there are 4+ words (not a short "no" command)
-            if (nowIdx === -1 && words.length >= 4) {
-                nowIdx = lastThree.lastIndexOf('no');
-            }
 
-            if (nowIdx !== -1) {
-                // Strip "now" and anything after it
-                const cutAt = words.length - (lastThree.length - nowIdx);
-                const before = words.slice(0, cutAt).join(' ').trim();
-                sparkLog('NOW prefix: "' + before + '"');
-
-                // Only try command matching on short phrases (1-3 words)
-                if (before && words.length <= 4) {
-                    const targets = getCommandTargets();
-                    let bestScore = 0, bestTarget = null;
-                    for (const t of targets) {
-                        for (const n of t.names) {
-                            const s = score(before, n);
-                            if (s > bestScore) { bestScore = s; bestTarget = t; }
-                        }
-                    }
-
-                    if (bestTarget && bestScore >= 0.5) {
-                        // Short command: "enter now", "tab now", etc.
-                        sparkLog('CMD_MATCH: "' + before + '" -> ' + bestTarget.label + ' (score=' + bestScore.toFixed(2) + ')');
-                        if (practiceMode) {
-                            setStatus('✓ ' + bestTarget.label + ' (practice)');
-                            sparkLog('PRACTICE_HIT: ' + bestTarget.label);
-                        } else {
-                            setStatus(bestTarget.label);
-                            bestTarget.act();
-                        }
-                        transcriptParts = [];
-                        pendingCommas = 0;
-                        processing = false;
-                        if (listening) startNewClip();
-                        return;
-                    }
+            // --- "go ahead" = send full transcript ---
+            const goAheadMatch = cleaned.match(/\bgo\s+ahead\b/);
+            if (goAheadMatch) {
+                // Strip "go ahead" and anything after it from transcript
+                const idx = cleaned.indexOf(goAheadMatch[0]);
+                const before = cleaned.substring(0, idx).trim();
+                if (before) {
+                    // Replace last transcript part with the trimmed version
+                    transcriptParts[transcriptParts.length - 1] = before;
                 }
-
-                // Long text or no command match — full transcription
-                sparkLog('CLIP_MATCH: now -> full transcribe');
+                sparkLog('GO_AHEAD trigger, sending full transcript');
                 if (practiceMode) {
                     setStatus('✓ SEND (practice)');
                     sparkLog('PRACTICE_SEND: ' + transcriptParts.join(' ').substring(0, 200));
                 } else {
-                    setStatus('NOW! Transcribing full recording...');
+                    setStatus('Sending transcript...');
                     await sendFullRecording();
                 }
                 transcriptParts = [];
                 pendingCommas = 0;
+                processing = false;
+                if (listening) startNewClip();
+                return;
             }
-            // No "now" found — just keep listening, no action
+
+            // --- "press/send" prefix = voice command ---
+            if (words.length <= 4 && /^(press|send|go)\b/.test(cleaned)) {
+                const targets = getCommandTargets();
+                let bestScore = 0, bestTarget = null;
+                for (const t of targets) {
+                    for (const n of t.names) {
+                        const s = score(cleaned, n);
+                        if (s > bestScore) { bestScore = s; bestTarget = t; }
+                    }
+                }
+
+                if (bestTarget && bestScore >= 0.5) {
+                    sparkLog('CMD_MATCH: "' + cleaned + '" -> ' + bestTarget.label + ' (score=' + bestScore.toFixed(2) + ')');
+                    if (practiceMode) {
+                        setStatus('✓ ' + bestTarget.label + ' (practice)');
+                        sparkLog('PRACTICE_HIT: ' + bestTarget.label);
+                    } else {
+                        setStatus(bestTarget.label);
+                        bestTarget.act();
+                    }
+                    transcriptParts = [];
+                    pendingCommas = 0;
+                    processing = false;
+                    if (listening) startNewClip();
+                    return;
+                }
+            }
+            // No trigger found — keep listening, accumulate transcript
         }
     } catch (e) {
         sparkLog('CLIP_ERROR: ' + e.message);
@@ -657,6 +702,15 @@ async function checkClipForKeyword() {
     processing = false;
     // Start fresh clip
     if (listening) startNewClip();
+}
+
+// --- Manual send button: cut and send whatever we have ---
+async function manualSend() {
+    sparkLog('MANUAL_SEND triggered');
+    setStatus('Sending transcript...');
+    await sendFullRecording();
+    transcriptParts = [];
+    pendingCommas = 0;
 }
 
 // --- Send accumulated transcript (with pauses) to tmux ---
@@ -740,41 +794,86 @@ async function pollScreen() {
     autoInterval = setTimeout(pollScreen, 2000);
 }
 
-// --- TTS polling (screen capture, universal) ---
-async function pollTranscript() {
-    if (!speakEnabled) return;
-    if (isSpeaking) {
-        setTimeout(pollTranscript, 3000);
-        return;
-    }
+// --- Speak text through the TTS endpoint ---
+async function speakText(text) {
     try {
-        const res = await fetch('/api/screen-latest');
-        const data = await res.json();
-        if (data.text && data.hash !== lastTranscriptHash) {
-            lastTranscriptHash = data.hash;
-            const ttsRes = await fetch('/api/tts', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({text: data.text}),
-            });
-            if (ttsRes.ok) {
-                const blob = await ttsRes.blob();
-                currentAudio = new Audio(URL.createObjectURL(blob));
-                isSpeaking = true;
-
-                document.getElementById('stop-btn').style.display = 'flex';
-                currentAudio.onended = () => {
-                    isSpeaking = false;
-                    currentAudio = null;
-                    document.getElementById('stop-btn').style.display = 'none';
-                    setStatus(listening ? 'Listening... say "now" to submit' : 'Ready');
-                };
-                currentAudio.play();
-                setStatus('Speaking: ' + data.text.substring(0, 80));
-            }
-        }
+        const ttsRes = await fetch('/api/tts', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text}),
+        });
+        if (!ttsRes.ok) return;
+        const blob = await ttsRes.blob();
+        currentAudio = new Audio(URL.createObjectURL(blob));
+        isSpeaking = true;
+        document.getElementById('stop-btn').style.display = 'flex';
+        currentAudio.onended = () => {
+            isSpeaking = false;
+            currentAudio = null;
+            document.getElementById('stop-btn').style.display = 'none';
+            setStatus(listening ? 'Listening... say "now" to submit' : 'Ready');
+            playNextSpeech();
+        };
+        currentAudio.play();
+        setStatus('Speaking: ' + text.substring(0, 80));
     } catch (e) {}
-    if (speakEnabled) setTimeout(pollTranscript, 3000);
+}
+
+// --- Speech queue: events arrive once, so queue instead of dropping ---
+const speechQueue = [];
+
+function enqueueSpeech(text) {
+    if (!speakEnabled) return;
+    speechQueue.push(text);
+    playNextSpeech();
+}
+
+function playNextSpeech() {
+    if (isSpeaking || !speakEnabled || speechQueue.length === 0) return;
+    speakText(speechQueue.shift());
+}
+
+function cleanQuestion(text) {
+    return text
+        .split('\n')
+        .map(l => l.replace(/[│┌┐└┘├┤─━❯⎿●✻>]/g, ' ').trim())
+        .filter(l => l && !/^(esc to|tab to|\? for|ctrl\+)/i.test(l))
+        .join('. ')
+        .replace(/\s+/g, ' ')
+        .substring(0, 250)
+        .trim();
+}
+
+// --- Server-sent events: status, questions, speech pushed from the server ---
+let eventSource = null;
+
+function startEvents() {
+    if (eventSource) return;
+    eventSource = new EventSource('/api/events');
+
+    eventSource.addEventListener('speak', (e) => {
+        const data = JSON.parse(e.data);
+        if (data.text) enqueueSpeech(data.text);
+    });
+
+    eventSource.addEventListener('question', (e) => {
+        const data = JSON.parse(e.data);
+        const spoken = cleanQuestion(data.text || '');
+        if (spoken) {
+            sparkLog('QUESTION_ANNOUNCE: ' + spoken.substring(0, 100));
+            enqueueSpeech('Claude is asking: ' + spoken);
+        }
+    });
+
+    eventSource.addEventListener('status', (e) => {
+        const data = JSON.parse(e.data);
+        if (data.status === 'working') setStatus('Claude is working...');
+    });
+
+    eventSource.onerror = () => {
+        // EventSource auto-reconnects; just log it
+        sparkLog('SSE_RECONNECTING');
+    };
 }
 
 
@@ -802,55 +901,295 @@ function setThemeColor(id) {
     document.documentElement.style.setProperty('--flame-mid', c + '40');
 }
 
-// --- Tab labels (editable, stored in localStorage) ---
+// --- Tabs: manual rename, per-tab color, reorder, hide/show ---
 const TAB_IDS = ['dev', 'nimbus', 'alpha', 'bravo', 'charlie', 'delta'];
+const ACTIVE_SESSION = '{{ session.id }}';
+let showHiddenTabs = false;
+
+// Default labels (numbers) — used on first load or after reset
 const TAB_DEFAULTS = {dev: '1', nimbus: '2', alpha: '3', bravo: '4', charlie: '5', delta: '6'};
 
-function getTabLabel(id) {
-    return localStorage.getItem('tab-label-' + id) || TAB_DEFAULTS[id] || id;
-}
+// Per-tab colors — each tab keeps its own color even when inactive
+const TAB_COLORS = {
+    dev: '#00bfff', nimbus: '#39ff14', alpha: '#fbbf24',
+    bravo: '#ff4444', charlie: '#bf5fff', delta: '#ff8800',
+};
 
-function setTabLabel(id, label) {
-    localStorage.setItem('tab-label-' + id, label);
-    const el = document.getElementById('tab-' + id);
-    if (el) el.textContent = label;
-}
-
-function loadTabLabels() {
+// Reset all stale tab labels on first visit (one-time migration)
+if (!localStorage.getItem('spark-tabs-v2')) {
     TAB_IDS.forEach(id => {
-        const el = document.getElementById('tab-' + id);
-        if (el) el.textContent = getTabLabel(id);
+        localStorage.removeItem('tab-label-' + id);
+        localStorage.removeItem('tab-hidden-' + id);
+        localStorage.removeItem('tab-lastused-' + id);
+        localStorage.removeItem('tab-manual-' + id);
     });
+    localStorage.removeItem('spark-tab-order');
+    localStorage.setItem('spark-tabs-v2', '1');
 }
 
-// Long-press to rename a tab
-let longPressTimer = null;
-TAB_IDS.forEach(id => {
-    const el = document.getElementById('tab-' + id);
-    if (!el) return;
-    el.addEventListener('touchstart', (e) => {
-        longPressTimer = setTimeout(() => {
+// Tab names are server-side (sessions.json) so they sync across devices.
+// One-time migration: push any old localStorage renames up to the server.
+if (!localStorage.getItem('spark-tabs-v3')) {
+    TAB_IDS.forEach(id => {
+        const old = localStorage.getItem('tab-label-' + id);
+        if (old) {
+            fetch('/api/session/rename', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id, name: old}),
+            }).catch(() => {});
+            localStorage.removeItem('tab-label-' + id);
+        }
+    });
+    localStorage.setItem('spark-tabs-v3', '1');
+}
+
+function getTabLabel(id) {
+    return getSessionInfo(id).name || TAB_DEFAULTS[id] || id;
+}
+
+async function setTabLabel(id, label) {
+    try {
+        await fetch('/api/session/rename', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id, name: label}),
+        });
+        const s = _sessions.find(x => x.id === id);
+        if (s) s.name = label;
+        localStorage.setItem('spark-sessions-cache', JSON.stringify(_sessions));
+    } catch(e) {}
+    renderTabs();
+}
+
+function getTabOrder() {
+    const stored = localStorage.getItem('spark-tab-order');
+    if (stored) {
+        try {
+            const order = JSON.parse(stored);
+            // Merge any missing IDs
+            TAB_IDS.forEach(id => { if (!order.includes(id)) order.push(id); });
+            return order.filter(id => TAB_IDS.includes(id));
+        } catch(e) {}
+    }
+    return [...TAB_IDS];
+}
+
+function setTabOrder(order) {
+    localStorage.setItem('spark-tab-order', JSON.stringify(order));
+    renderTabs();
+}
+
+function isTabHidden(id) {
+    return localStorage.getItem('tab-hidden-' + id) === '1';
+}
+
+function setTabHidden(id, hidden) {
+    if (hidden) localStorage.setItem('tab-hidden-' + id, '1');
+    else localStorage.removeItem('tab-hidden-' + id);
+    // Server-side too: removes it from /talk feed, resets name + conversation
+    fetch('/api/session/hide', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id, hidden}),
+    }).catch(() => {});
+    renderTabs();
+}
+
+function getVisibleTabs() {
+    return getTabOrder().filter(id => !isTabHidden(id));
+}
+
+function getHiddenTabs() {
+    return getTabOrder().filter(id => isTabHidden(id));
+}
+
+function getSessionInfo(id) {
+    return _sessions.find(s => s.id === id) || {};
+}
+
+function createTabButton(id, isHidden) {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (isHidden ? ' hidden-tab' : '');
+    btn.id = 'tab-' + id;
+    btn.textContent = getTabLabel(id);
+
+    // Second line: live status (what the session is doing right now)
+    const liveInfo = getSessionInfo(id);
+    if (!isHidden && liveInfo.small && liveInfo.small !== 'inactive') {
+        btn.textContent = '';
+        const top = document.createElement('div');
+        top.textContent = getTabLabel(id);
+        const sub = document.createElement('div');
+        sub.className = 'tab-sub';
+        sub.textContent = liveInfo.small;
+        btn.appendChild(top);
+        btn.appendChild(sub);
+    }
+
+    const color = TAB_COLORS[id] || '#3b82f6';
+    if (id === ACTIVE_SESSION && !isHidden) {
+        btn.classList.add('active');
+        btn.style.background = color;
+        btn.style.borderColor = color;
+        btn.style.color = '#fff';
+    } else if (!isHidden) {
+        // Inactive tabs get a subtle tint of their color
+        btn.style.borderColor = color + '80';
+        btn.style.color = color;
+    }
+
+    // Dim tabs whose terminal is just sitting at a shell (nothing running)
+    const info = getSessionInfo(id);
+    if (info.id && !info.alive && id !== ACTIVE_SESSION) {
+        btn.style.opacity = '0.45';
+    }
+
+    // Single tap = switch, double tap = hide (or unhide for hidden tabs)
+    let tapTimer = null;
+    btn.onclick = () => {
+        if (tapTimer) {
+            clearTimeout(tapTimer);
+            tapTimer = null;
+            if (!isHidden) {
+                setTabHidden(id, true);
+                setStatus('Hid tab ' + getTabLabel(id));
+            }
+            return;
+        }
+        tapTimer = setTimeout(() => {
+            tapTimer = null;
+            if (isHidden) setTabHidden(id, false);
+            switchSession(id);
+        }, 300);
+    };
+
+    // Long-press / right-click for menu
+    let lpt = null;
+    btn.addEventListener('touchstart', (e) => {
+        lpt = setTimeout(() => {
             e.preventDefault();
-            const name = prompt('Label for this tab:', getTabLabel(id));
-            if (name !== null && name.trim()) setTabLabel(id, name.trim());
+            tabContextMenu(id);
         }, 600);
     }, {passive: false});
-    el.addEventListener('touchend', () => clearTimeout(longPressTimer));
-    el.addEventListener('touchmove', () => clearTimeout(longPressTimer));
-    // Desktop: right-click to rename
-    el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        const name = prompt('Label for this tab:', getTabLabel(id));
-        if (name !== null && name.trim()) setTabLabel(id, name.trim());
-    });
-});
+    btn.addEventListener('touchend', () => clearTimeout(lpt));
+    btn.addEventListener('touchmove', () => clearTimeout(lpt));
+    btn.addEventListener('contextmenu', (e) => { e.preventDefault(); tabContextMenu(id); });
 
-function highlightActiveSession() {
-    const active = '{{ session.id }}';
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    const el = document.getElementById('tab-' + active);
-    if (el) el.classList.add('active');
-    setThemeColor(active);
+    return btn;
+}
+
+function tabContextMenu(id) {
+    const order = getTabOrder();
+    const pos = order.indexOf(id) + 1;
+    const total = order.length;
+    const action = prompt(
+        `Tab: ${getTabLabel(id)} (pos ${pos}/${total})\n\n` +
+        `• Type a name to rename\n` +
+        `• "hide" to hide\n` +
+        `• A number (1-${total}) to move to that position`,
+        getTabLabel(id)
+    );
+    if (action === null) return;
+    const trimmed = action.trim();
+    if (!trimmed) return;
+
+    if (trimmed.toLowerCase() === 'hide') {
+        setTabHidden(id, true);
+    } else if (/^\d+$/.test(trimmed)) {
+        // Reorder: move tab to position N
+        const newPos = Math.max(1, Math.min(total, parseInt(trimmed, 10))) - 1;
+        const newOrder = order.filter(x => x !== id);
+        newOrder.splice(newPos, 0, id);
+        setTabOrder(newOrder);
+    } else {
+        setTabLabel(id, trimmed);
+    }
+}
+
+function renderTabs() {
+    const bar = document.getElementById('tab-bar');
+    const hiddenBar = document.getElementById('hidden-tabs');
+    bar.innerHTML = '';
+    hiddenBar.innerHTML = '';
+
+    const visible = getVisibleTabs();
+    const hidden = getHiddenTabs();
+
+    visible.forEach(id => bar.appendChild(createTabButton(id, false)));
+
+    // "+" button: pick CLI type, then name it
+    const plus = document.createElement('button');
+    plus.className = 'tab-btn more-btn';
+    plus.textContent = '+';
+    plus.onclick = () => {
+        showHiddenTabs = !showHiddenTabs;
+        hiddenBar.style.display = showHiddenTabs ? 'flex' : 'none';
+    };
+    bar.appendChild(plus);
+
+    const CLIS = [
+        {id: 'claude', label: 'Claude', color: '#d97706'},
+        {id: 'gemini', label: 'Gemini', color: '#3b82f6'},
+    ];
+    CLIS.forEach(c => {
+        const b = document.createElement('button');
+        b.className = 'tab-btn';
+        b.textContent = c.label;
+        b.style.borderColor = c.color + '80';
+        b.style.color = c.color;
+        b.onclick = () => launchCli(c.id);
+        hiddenBar.appendChild(b);
+    });
+
+    hiddenBar.style.display = showHiddenTabs ? 'flex' : 'none';
+
+    setThemeColor(ACTIVE_SESSION);
+}
+
+async function launchCli(cli) {
+    // Prompt for a name first
+    const name = prompt(`Name for this ${cli} session:`, '');
+    if (!name || !name.trim()) return;
+
+    // Refresh live state so the picker shows what's running where
+    try {
+        const r = await fetch('/api/sessions');
+        _sessions = (await r.json()).sessions;
+    } catch(e) {}
+
+    // Auto-pick first free tab, or least recently used if all busy
+    let target = _sessions.find(s => !s.alive);
+    if (!target) {
+        target = [..._sessions].sort((a, b) =>
+            (a.last_used || '') < (b.last_used || '') ? -1 : 1
+        )[0];
+    }
+
+    setStatus('Launching ' + cli + ' as ' + name.trim() + '...');
+    try {
+        const res = await fetch('/api/session/launch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id: target.id, cli}),
+        });
+        if (res.ok) {
+            // Rename the tab to the user's chosen name
+            await fetch('/api/session/rename', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: target.id, name: name.trim()}),
+            });
+            setTabLabel(target.id, name.trim());
+            setTabHidden(target.id, false);
+            switchSession(target.id);
+        } else {
+            const data = await res.json();
+            setStatus('Launch failed: ' + (data.error || res.status));
+        }
+    } catch(e) {
+        setStatus('Launch failed: ' + e.message);
+    }
 }
 
 // Persist speaker state across page reloads
@@ -870,16 +1209,28 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 
-// Load sessions on startup, auto-start mic
-window.addEventListener('load', async () => {
+// Render tabs immediately (script runs at end of body — DOM is ready).
+// Use cached session state so alive-dimming is instant, then refresh in background.
+try {
+    _sessions = JSON.parse(localStorage.getItem('spark-sessions-cache') || '[]');
+} catch(e) {}
+renderTabs();
+
+async function refreshSessions() {
     try {
         const res = await fetch('/api/sessions');
         const data = await res.json();
         _sessions = data.sessions;
+        localStorage.setItem('spark-sessions-cache', JSON.stringify(_sessions));
+        renderTabs();
     } catch(e) {}
-    loadTabLabels();
-    if (speakEnabled) pollTranscript();
-    highlightActiveSession();
+}
+refreshSessions();
+setInterval(refreshSessions, 10000);  // keep tab names + statuses live
+
+// Heavy startup (mic, TTS) still waits for full page load
+window.addEventListener('load', () => {
+    startEvents();
     // Auto-start mic on page load
     if (!listening) toggleListening();
 });

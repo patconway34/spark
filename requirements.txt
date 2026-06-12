@@ -1,4 +1,5 @@
 flask
 gtts
+edge-tts
 requests
 python-dotenv

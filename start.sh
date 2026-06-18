@@ -1,10 +1,15 @@
 #!/bin/bash
-# Spark — start tmux sessions + ttyd terminals
+# Spark — start tmux sessions + ttyd terminals (3 sessions)
+#
+# Environment variables (all optional):
+#   SPARK_PROJECT_DIR  — working directory for tmux sessions (default: $HOME)
 
-SESSIONS=("claude" "claude2" "claude3" "claude4" "claude5" "claude6")
-PORTS=(7682 7683 7684 7685 7686 7687)
+SESSIONS=("claude" "claude2" "claude3")
+PORTS=(7682 7683 7684)
+WORK_DIR="/mnt/c/dev"
 
 echo "=== Spark start ==="
+echo "Working directory: $WORK_DIR"
 
 # --- Kill old ttyd instances ---
 echo "Killing old ttyd instances..."
@@ -17,7 +22,7 @@ for s in "${SESSIONS[@]}"; do
     if tmux has-session -t "$s" 2>/dev/null; then
         echo "  $s — already running"
     else
-        tmux new-session -d -s "$s" -c /mnt/c/dev
+        tmux new-session -d -s "$s" -c "$WORK_DIR"
         echo "  $s — created"
     fi
 done

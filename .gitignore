@@ -3,9 +3,15 @@
 *.pyc
 __pycache__/
 sessions.json
+users.json
 transcripts/
 last_response.txt
 chat_summary.txt
 chat_full.txt
 .spark_input.txt
 examples/
+tts_cache/
+events.jsonl
+detection_screens/
+detection.jsonl
+*.bat

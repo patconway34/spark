@@ -2,297 +2,71 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
     <title>Spark</title>
-    <style>
-        :root {
-            --flame: #3b82f6;
-            --flame-dim: #3b82f620;
-            --flame-mid: #3b82f640;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            background: #1a1a2e;
-            color: #e0e0e0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            overscroll-behavior: contain;
-        }
-        #terminal {
-            flex: 1;
-            border: none;
-            border-top: 2px solid var(--flame-mid);
-            width: 100%;
-        }
-        #status-bar {
-            padding: 0.3rem 0.75rem;
-            background: #111122;
-            border-top: 1px solid var(--flame-mid);
-            font-size: 0.75rem;
-            color: #888;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-            white-space: normal;
-            max-height: 3rem;
-            overflow-y: auto;
-        }
-        #controls {
-            background: #111122;
-            border-top: 1px solid #2a2a4e;
-            padding: 0.3rem 0.4rem;
-            padding-bottom: calc(0.3rem + env(safe-area-inset-bottom, 0px));
-            display: flex;
-            flex-direction: column;
-            gap: 0.3rem;
-        }
-        .key-row {
-            display: flex;
-            gap: 0.25rem;
-            justify-content: center;
-        }
-        .key-btn {
-            height: 38px;
-            flex: 1;
-            max-width: 80px;
-            border: 1px solid #3a3a5e;
-            border-radius: 6px;
-            background: #2a2a4e;
-            color: #ccc;
-            font-size: 0.7rem;
-            font-family: monospace;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .key-btn:active {
-            background: #5a5a8e;
-        }
-        .big-btn {
-            height: 54px;
-            flex: 1;
-            border: 1px solid #3a3a5e;
-            border-radius: 12px;
-            background: #2a2a4e;
-            color: #fff;
-            font-size: 1rem;
-            font-weight: 600;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            -webkit-user-select: none;
-            user-select: none;
-        }
-        .big-btn:active {
-            filter: brightness(1.5);
-        }
-        .bar-btn {
-            width: 40px;
-            height: 40px;
-            border: none;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            flex-shrink: 0;
-        }
-        #send-btn {
-            background: #3498db;
-            color: #fff;
-            transition: background 0.2s;
-        }
-        #send-btn:active {
-            background: #2178b5;
-        }
-        #mic-btn {
-            background: #7b6ba8;
-            color: #fff;
-            transition: background 0.2s;
-        }
-        #mic-btn.listening {
-            background: #2ecc71;
-        }
-        #mic-btn.recording {
-            background: #e04040;
-            animation: pulse 1s infinite;
-        }
-        #stop-btn {
-            background: #e04040;
-            color: #fff;
-            display: none;
-        }
-        #speak-toggle {
-            background: #2a2a4e;
-            font-size: 1.1rem;
-        }
-        #stt-toggle {
-            background: #2a2a4e;
-            color: #ccc;
-            font-size: 0.6rem;
-            font-weight: bold;
-            width: 40px;
-            height: 40px;
-        }
-        #auto-btn {
-            background: #2a2a4e;
-            color: #888;
-            font-size: 0.6rem;
-            font-weight: bold;
-            width: 40px;
-            height: 40px;
-            transition: background 0.2s;
-        }
-        #auto-btn.active {
-            background: #2ecc71;
-            color: #fff;
-        }
-        .tab-btn {
-            min-height: 32px;
-            padding: 3px 12px;
-            border: 1px solid #3a3a5e;
-            border-radius: 16px;
-            background: #2a2a4e;
-            color: #999;
-            font-size: 0.7rem;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            cursor: pointer;
-            white-space: nowrap;
-            transition: all 0.2s;
-            -webkit-user-select: none;
-            user-select: none;
-        }
-        .tab-btn.active {
-            background: var(--flame);
-            color: #fff;
-            border-color: var(--flame);
-            font-weight: 600;
-        }
-        .tab-btn.hidden-tab {
-            opacity: 0.5;
-            border-style: dashed;
-        }
-        .tab-sub {
-            font-size: 0.55rem;
-            opacity: 0.75;
-            font-weight: 400;
-            max-width: 110px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .tab-btn.more-btn {
-            background: #1a1a3e;
-            color: #666;
-            font-size: 0.9rem;
-            padding: 0 10px;
-        }
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.7">
 </head>
 <body>
 
-<iframe id="terminal" src="{{ session.terminal_url or 'https://terminal.tradingdata.net' }}"></iframe>
+{% for s in sessions %}
+<iframe id="term-{{ s.id }}" class="terminal-frame" src="{{ s.terminal_url }}" style="{% if s.id != session.id %}display:none;{% endif %}"></iframe>
+{% endfor %}
 
 <div id="status-bar">Tap mic to start listening</div>
 
 <div id="controls">
-    <!-- Utility row: rarely used, kept small -->
-    <div class="key-row">
-        <button class="key-btn" onclick="window.location.href='/talk'" style="font-size:0.65rem;font-weight:600;color:#6ecf9a;">Chat</button>
-        <button class="key-btn" onclick="sendSlashNew()" style="font-size:0.65rem;font-weight:600;letter-spacing:-0.5px;">/new</button>
-        <button class="key-btn" onclick="sendKey('BTab')">⇧Tab</button>
-        <button class="key-btn" onclick="sendKey('Tab')">Tab</button>
-        <button class="key-btn" onclick="sendKey('Up')">&#9650;</button>
-        <button class="key-btn" onclick="sendKey('Down')">&#9660;</button>
-        <button class="key-btn" onclick="scrollTerminal('up')" style="font-size:0.55rem;">PgUp</button>
-        <button class="key-btn" onclick="scrollTerminal('down')" style="font-size:0.55rem;">PgDn</button>
-        <button id="send-btn" class="key-btn" onclick="manualSend()" title="Send transcript">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M2 21l21-9L2 3v7l15 2-15 2z"></path>
-            </svg>
+    <!-- Hamburger menu (hidden by default) -->
+    <div id="hamburger-panel" style="display:none; flex-wrap:wrap; gap:0.2rem; padding:0.2rem 0.4rem; justify-content:center;">
+        <button id="mic-btn" class="btn key-btn" onclick="toggleListening()" style="height:28px;font-size:0.6rem;">
+            🎙 Mic
         </button>
-        <button id="speak-toggle" class="key-btn" onclick="toggleSpeak()" style="font-size:0.85rem;">
-            <span id="speak-icon">🔇</span>
-        </button>
-        <button id="blink-btn" class="key-btn app-btn" onclick="toggleApp('blink')" title="Blink">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        </button>
-        <button id="radar-btn" class="key-btn app-btn" onclick="toggleApp('radar')" title="Radar" style="font-size:0.65rem;font-weight:600;">Rdr</button>
-        <button id="marsh-btn" class="key-btn app-btn" onclick="toggleApp('marsh')" title="Marsh files" style="font-size:0.65rem;font-weight:600;">Files</button>
+        <button class="btn key-btn" onclick="sendSlashNew()" style="height:28px;font-size:0.6rem;font-weight:600;">/new</button>
+        <button class="btn key-btn" onclick="sendKey('Tab')" style="height:28px;font-size:0.6rem;">Tab</button>
+        <button class="btn key-btn" onclick="sendKey('BTab')" style="height:28px;font-size:0.6rem;">⇧Tab</button>
+        <button class="btn key-btn" onclick="sendKey('Up')" style="height:28px;font-size:0.6rem;">▲</button>
+        <button class="btn key-btn" onclick="sendKey('Down')" style="height:28px;font-size:0.6rem;">▼</button>
+        <button class="btn key-btn" onclick="sendKey('C-c')" style="height:28px;font-size:0.6rem;">^C</button>
+        <button class="btn key-btn" onclick="sendKey('C-z')" style="height:28px;font-size:0.6rem;">^Z</button>
     </div>
-    <!-- Session tabs -->
-    <div class="key-row" id="tab-bar" style="justify-content: center; gap: 0.3rem; flex-wrap: wrap;">
-        <!-- Tabs rendered dynamically by JS -->
+
+    <!-- Row 1: Left half (Hamburger|Send|PgUp|PgDn) | Right half (Tabs) -->
+    <div style="display:flex; align-items:center; margin-top:0.3rem; padding:0 0.2rem;">
+        <div style="width:50%; display:flex; gap:0.3rem; align-items:center; flex-shrink:0;">
+            <button class="btn key-btn" onclick="toggleHamburger()" style="font-size:0.7rem; flex:1; height:32px; padding:0;">☰</button>
+            <button id="send-btn" class="btn bar-btn" onclick="manualSend()" title="Send" style="flex:1; height:32px; min-width:0;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </button>
+            <button class="btn key-btn" onclick="scrollTerminal('up')" style="font-size:0.5rem;flex:1;height:32px;padding:0;">PgUp</button>
+            <button class="btn key-btn" onclick="scrollTerminal('down')" style="font-size:0.5rem;flex:1;height:32px;padding:0;">PgDn</button>
+        </div>
+        <div id="tab-bar" style="width:50%; display:flex; gap:0.3rem; padding-left:0.3rem; overflow:hidden;">
+            <!-- Tabs rendered by JS -->
+        </div>
     </div>
-    <div class="key-row" id="hidden-tabs" style="justify-content: center; gap: 0.3rem; flex-wrap: wrap; display: none;">
-        <!-- Hidden tabs + launcher shown when "+" is clicked -->
+
+    <!-- Row 2: ESC | ENTER -->
+    <div class="key-row" style="gap:0.5rem;">
+        <button class="btn big-btn btn-esc" onclick="sendKey('Escape')" style="flex:1;height:50px;">ESC</button>
+        <button class="btn big-btn btn-enter" onclick="sendKey('Enter')" style="flex:1;height:50px;">ENTER</button>
     </div>
-    <!-- Main row: the big three — Esc, Mic, Enter -->
-    <div class="key-row" style="gap: 0.5rem; align-items: center;">
-        <button class="big-btn" onclick="sendKey('Escape')" style="background:#5a2a3a;border-color:#8a4a5a;">Esc</button>
-        <button id="stop-btn" class="bar-btn" onclick="stopSpeaking()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="4" y="4" width="16" height="16" rx="2"></rect>
-            </svg>
-        </button>
-        <button id="mic-btn" class="bar-btn" onclick="toggleListening()" style="width:54px;height:54px;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                <line x1="12" y1="19" x2="12" y2="23"></line>
-                <line x1="8" y1="23" x2="16" y2="23"></line>
-            </svg>
-        </button>
-        <button class="big-btn" onclick="sendKey('Enter')" style="background:#1f4a32;border-color:#3a7a52;">Enter</button>
-    </div>
-    <div style="height: 100px;"></div>
+    <div style="height:60px;"></div>
 </div>
 
 <script>
 // --- State ---
-// Suppress "leave site" prompts
-window.onbeforeunload = null;
-window.addEventListener('beforeunload', (e) => { delete e.returnValue; });
-
-// --- App view toggle (Blink, Radar, Marsh) ---
-let appView = null;
-let terminalUrl = document.getElementById('terminal').src;
-const APP_URLS = {
-    blink: 'https://blink.tradingdata.net',
-    radar: 'https://radar.tradingdata.net',
-    marsh: 'https://marsh.tradingdata.net',
-};
-
-function toggleApp(name) {
-    const frame = document.getElementById('terminal');
-    document.querySelectorAll('.app-btn').forEach(b => {
-        b.style.background = '';
-        b.style.color = '';
-    });
-    if (appView === name) {
-        frame.src = terminalUrl;
-        appView = null;
-        return;
+window.addEventListener('beforeunload', () => {
+    if (typeof audioStream !== 'undefined' && audioStream) {
+        audioStream.getTracks().forEach(t => t.stop());
     }
-    if (!appView) terminalUrl = frame.src;
-    frame.src = APP_URLS[name];
-    appView = name;
-    const btn = document.getElementById(name + '-btn');
-    if (btn) { btn.style.background = '#2563eb'; btn.style.color = '#fff'; }
-}
+    if (typeof mainRecorder !== 'undefined' && mainRecorder && mainRecorder.state === 'recording') {
+        try { mainRecorder.stop(); } catch(e) {}
+    }
+    if (typeof clipRecorder !== 'undefined' && clipRecorder && clipRecorder.state === 'recording') {
+        try { clipRecorder.stop(); } catch(e) {}
+    }
+});
 
 let listening = false;
-let speakEnabled = false;
-let currentAudio = null;
-let isSpeaking = false;
 
 // --- Core ---
 let audioStream = null;
@@ -319,7 +93,6 @@ let transcriptParts = [];  // accumulates text + commas between keyword checks
 
 const VOLUME_THRESHOLD = 10;
 const SILENCE_SECONDS = 2;  // seconds of silence before checking clip
-let practiceMode = false;   // when true, logs matches but doesn't fire
 
 function sparkLog(msg) {
     fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({msg})}).catch(()=>{});
@@ -331,7 +104,6 @@ function scrollTerminal(direction) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({direction}),
     });
-    window.scrollTo(0, 0);
 }
 
 async function sendKey(key) {
@@ -344,7 +116,6 @@ async function sendKey(key) {
         if (!res.ok) sparkLog('KEY_ERR: ' + res.status);
     } catch (e) {
         sparkLog('KEY_FETCH_ERR: ' + e.message);
-        // Retry once after 200ms
         setTimeout(() => {
             fetch('/api/key', {
                 method: 'POST',
@@ -367,26 +138,9 @@ function setStatus(text) {
     document.getElementById('status-bar').textContent = text;
 }
 
-// --- TTS controls ---
-function toggleSpeak() {
-    speakEnabled = !speakEnabled;
-    document.getElementById('speak-icon').textContent = speakEnabled ? '🔊' : '🔇';
-    localStorage.setItem('speakEnabled', speakEnabled);
-    if (!speakEnabled) {
-        speechQueue.length = 0;
-        stopSpeaking();
-    }
-}
-
-function stopSpeaking() {
-    if (currentAudio) {
-        currentAudio.pause();
-        currentAudio.currentTime = 0;
-        currentAudio = null;
-    }
-    isSpeaking = false;
-    document.getElementById('stop-btn').style.display = 'none';
-    setStatus(listening ? 'Recording... say "now" to send' : 'Stopped');
+function toggleHamburger() {
+    const panel = document.getElementById('hamburger-panel');
+    panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
 }
 
 // --- Mic toggle ---
@@ -409,7 +163,7 @@ async function startListening() {
         startKeywordScanner();
         listening = true;
         document.getElementById('mic-btn').classList.add('listening');
-        setStatus('Recording... say "now" to send');
+        setStatus('Recording... say "go ahead" to send');
         sparkLog('MIC_ON');
     } catch (e) {
         setStatus('Mic access denied');
@@ -448,8 +202,7 @@ function startMainRecorder() {
     sparkLog('MAIN_REC_START');
 }
 
-// --- Clip recorder (separate, for keyword detection) ---
-// Starts when voice detected, stops+checks on silence
+// --- Clip recorder ---
 function stopClipCycle() {
     if (clipRecorder && clipRecorder.state === 'recording') {
         try { clipRecorder.stop(); } catch(e) {}
@@ -459,7 +212,6 @@ function stopClipCycle() {
 }
 
 function startNewClip() {
-    // Stop old one if still running
     if (clipRecorder && clipRecorder.state === 'recording') {
         try { clipRecorder.stop(); } catch(e) {}
     }
@@ -473,7 +225,7 @@ function startNewClip() {
     sparkLog('CLIP_REC_START');
 }
 
-// --- Volume monitoring (UI only — keyword scanning is separate) ---
+// --- Volume monitoring ---
 async function startVolumeMonitor() {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
     if (audioContext.state === 'suspended') await audioContext.resume();
@@ -484,7 +236,7 @@ async function startVolumeMonitor() {
     const data = new Uint8Array(analyser.frequencyBinCount);
 
     volumeInterval = setInterval(() => {
-        if (isSpeaking || processing) return;
+        if (processing) return;
         analyser.getByteFrequencyData(data);
         const avg = data.reduce((a, b) => a + b, 0) / data.length;
 
@@ -493,30 +245,26 @@ async function startVolumeMonitor() {
             setStatus('🎙 ' + Math.round(avg) + ' dB');
             wasTalking = true;
             clipHadSpeech = true;
-            // Cancel silence countdown and tick timer
             if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; silenceCommas = 0; }
             if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
             totalTicks = 0;
         } else {
             document.getElementById('mic-btn').classList.remove('recording');
             if (listening) document.getElementById('mic-btn').classList.add('listening');
-            // Start ticking every second of silence
             if (!tickTimer) {
                 totalTicks = 0;
                 tickTimer = setInterval(() => {
                     totalTicks++;
                     pendingCommas++;
-                    setStatus(', '.repeat(totalTicks).trim());
+                    setStatus(', '.repeat(totalTicks).trim() || 'Waiting...');
                 }, 1000);
             }
-            // If we were talking and now silent, start keyword countdown
             if (wasTalking && !silenceTimer) {
                 silenceCommas = 0;
                 silenceTimer = setTimeout(() => {
                     silenceTimer = null;
                     silenceCommas = totalTicks;
                     wasTalking = false;
-                    sparkLog('SILENCE -> checking clip for keyword');
                     checkClipForKeyword();
                 }, SILENCE_SECONDS * 1000);
             }
@@ -530,14 +278,12 @@ function stopVolumeMonitor() {
     analyser = null;
 }
 
-// --- Keyword scanner (triggered by silence, not a timer) ---
 function startKeywordScanner() {
-    startNewClip();  // start first clip immediately
+    startNewClip();
     wasTalking = false;
     silenceTimer = null;
     transcriptParts = [];
     pendingCommas = 0;
-    sparkLog('KEYWORD_SCANNER_START: silence-triggered');
 }
 
 function stopKeywordScanner() {
@@ -550,59 +296,46 @@ function stopKeywordScanner() {
     pendingCommas = 0;
 }
 
-// --- Score how well two strings match (0-1, higher = better) ---
 function score(a, b) {
     if (a === b) return 1;
-    // Only allow includes match if lengths are within 2 chars of each other
     if (Math.abs(a.length - b.length) <= 2 && (a.includes(b) || b.includes(a))) return 0.9;
     let m = 0;
     for (let i = 0; i < Math.min(a.length, b.length); i++) { if (a[i] === b[i]) m++; }
     return m / Math.max(a.length, b.length);
 }
 
-// --- All command targets ---
 function getCommandTargets() {
     return [
-        // Voice commands — only enter and escape, everything else is buttons
-        {names: ['press enter', 'press nter', 'press inter', 'press centro'], act: () => sendKey('Enter'), label: 'enter'},
-        {names: ['press escape', 'press scape', 'press escap', 'press a scape'], act: () => sendKey('Escape'), label: 'escape'},
-        // Navigation
-        {names: ['go back', 'go home'], act: () => { window.location.href = '/'; }, label: 'main menu'},
+        {names: ['press enter', 'send enter', 'press nter', 'press inter'], act: () => sendKey('Enter'), label: 'enter'},
+        {names: ['press escape', 'send escape', 'press scape'], act: () => sendKey('Escape'), label: 'escape'},
+        {names: ['press clear', 'clear all'], act: () => {
+            transcriptParts = []; pendingCommas = 0;
+            setStatus('Transcript cleared.');
+        }, label: 'clear transcript'},
         {names: ['press clear', 'clear recording'], act: () => {
             if (mainRecorder && mainRecorder.state === 'recording') try { mainRecorder.stop(); } catch(e) {}
             mainChunks = [];
             if (listening) startMainRecorder();
             setStatus('Recording cleared.');
         }, label: 'clear'},
-        // Sessions
         ..._sessions.map(s => ({
             names: [s.name.toLowerCase(), s.id],
-            act: () => {
-                fetch('/api/session', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({id: s.id}),
-                }).then(() => { window.location.href = '/chat'; });
-            },
+            act: () => switchSession(s.id),
             label: 'session: ' + s.name,
         })),
     ];
 }
 
-// --- Check the short clip for "now" keyword ---
 async function checkClipForKeyword() {
     if (processing) return;
     processing = true;
 
-    // Only process if there was actual speech in this clip
     if (!clipHadSpeech) {
-        sparkLog('CLIP: no speech detected, skipping');
         processing = false;
         if (listening) startNewClip();
         return;
     }
 
-    // Stop current clip to collect audio
     if (clipRecorder && clipRecorder.state === 'recording') {
         await new Promise(resolve => {
             clipRecorder.onstop = resolve;
@@ -610,18 +343,9 @@ async function checkClipForKeyword() {
         });
     }
 
-    if (clipChunks.length === 0 && !prevClipBlob) {
-        sparkLog('CLIP: no chunks');
-        processing = false;
-        if (listening) startNewClip();
-        return;
-    }
-
-    // Use current clip (it's a proper standalone recording)
     const mimeType = clipRecorder ? clipRecorder.mimeType : 'audio/webm';
     const ext = mimeType.includes('webm') ? 'webm' : 'm4a';
     const blob = new Blob(clipChunks, {type: mimeType});
-    sparkLog('CLIP: sending ' + blob.size + ' bytes');
 
     const formData = new FormData();
     formData.append('audio', blob, `clip.${ext}`);
@@ -631,34 +355,21 @@ async function checkClipForKeyword() {
         const data = await res.json();
         if (data.text) {
             const heard = data.text.trim().toLowerCase();
-            // Prepend any accumulated silence commas before this speech
             const commaPrefix = pendingCommas > 0 ? ', '.repeat(pendingCommas) : '';
             pendingCommas = 0;
             transcriptParts.push(commaPrefix + heard);
-            sparkLog('CLIP_HEARD: ' + transcriptParts.join(' '));
 
-            // Strip phantom "thank you" Groq adds from background noise
             const cleaned = heard.replace(/[^a-z ]/g, '').trim().replace(/\s*thank you\s*$/g, '').trim();
             const words = cleaned.split(/\s+/);
 
-            // --- "go ahead" = send full transcript ---
             const goAheadMatch = cleaned.match(/\bgo\s+ahead\b/);
             if (goAheadMatch) {
-                // Strip "go ahead" and anything after it from transcript
                 const idx = cleaned.indexOf(goAheadMatch[0]);
                 const before = cleaned.substring(0, idx).trim();
-                if (before) {
-                    // Replace last transcript part with the trimmed version
-                    transcriptParts[transcriptParts.length - 1] = before;
-                }
-                sparkLog('GO_AHEAD trigger, sending full transcript');
-                if (practiceMode) {
-                    setStatus('✓ SEND (practice)');
-                    sparkLog('PRACTICE_SEND: ' + transcriptParts.join(' ').substring(0, 200));
-                } else {
-                    setStatus('Sending transcript...');
-                    await sendFullRecording();
-                }
+                if (before) transcriptParts[transcriptParts.length - 1] = before;
+                
+                setStatus('Sending transcript...');
+                await sendFullRecording();
                 transcriptParts = [];
                 pendingCommas = 0;
                 processing = false;
@@ -666,7 +377,6 @@ async function checkClipForKeyword() {
                 return;
             }
 
-            // --- "press/send" prefix = voice command ---
             if (words.length <= 4 && /^(press|send|go)\b/.test(cleaned)) {
                 const targets = getCommandTargets();
                 let bestScore = 0, bestTarget = null;
@@ -678,14 +388,8 @@ async function checkClipForKeyword() {
                 }
 
                 if (bestTarget && bestScore >= 0.5) {
-                    sparkLog('CMD_MATCH: "' + cleaned + '" -> ' + bestTarget.label + ' (score=' + bestScore.toFixed(2) + ')');
-                    if (practiceMode) {
-                        setStatus('✓ ' + bestTarget.label + ' (practice)');
-                        sparkLog('PRACTICE_HIT: ' + bestTarget.label);
-                    } else {
-                        setStatus(bestTarget.label);
-                        bestTarget.act();
-                    }
+                    setStatus(bestTarget.label);
+                    bestTarget.act();
                     transcriptParts = [];
                     pendingCommas = 0;
                     processing = false;
@@ -693,45 +397,65 @@ async function checkClipForKeyword() {
                     return;
                 }
             }
-            // No trigger found — keep listening, accumulate transcript
         }
-    } catch (e) {
-        sparkLog('CLIP_ERROR: ' + e.message);
-    }
+    } catch (e) { console.error(e); }
 
     processing = false;
-    // Start fresh clip
     if (listening) startNewClip();
 }
 
-// --- Manual send button: cut and send whatever we have ---
 async function manualSend() {
-    sparkLog('MANUAL_SEND triggered');
+    // Cancel pending timers
+    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+    if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+    wasTalking = false;
+    processing = true;
     setStatus('Sending transcript...');
+
+    // Stop clip recorder and transcribe any remaining audio
+    if (clipRecorder && clipRecorder.state === 'recording') {
+        await new Promise(resolve => {
+            clipRecorder.onstop = resolve;
+            clipRecorder.stop();
+        });
+        if (clipChunks.length > 0) {
+            const mimeType = clipRecorder.mimeType || 'audio/webm';
+            const ext = mimeType.includes('webm') ? 'webm' : 'm4a';
+            const blob = new Blob(clipChunks, {type: mimeType});
+            try {
+                const formData = new FormData();
+                formData.append('audio', blob, `clip.${ext}`);
+                const res = await fetch('/api/transcribe', {method: 'POST', body: formData});
+                const data = await res.json();
+                if (data.text) {
+                    const heard = data.text.trim().toLowerCase();
+                    const commaPrefix = pendingCommas > 0 ? ', '.repeat(pendingCommas) : '';
+                    transcriptParts.push(commaPrefix + heard);
+                }
+            } catch (e) { console.error('Final clip transcribe failed:', e); }
+        }
+    }
+
     await sendFullRecording();
     transcriptParts = [];
     pendingCommas = 0;
+    totalTicks = 0;
+    processing = false;
+    if (listening) startNewClip();
 }
 
-// --- Send accumulated transcript (with pauses) to tmux ---
 async function sendFullRecording() {
-    // Build text from accumulated transcript parts (already has commas for pauses)
     let text = transcriptParts.join(' ').trim();
-
-    // Strip "now" and trailing commas/punctuation from the end
-    text = text.replace(/[,.\s]*now[,.\s?]*$/i, '').trim();
-    // Clean up any trailing commas
+    text = text.replace(/[,.\s]*go ahead[,.\s?]*$/i, '').trim();
     text = text.replace(/[,\s]+$/, '').trim();
 
     if (text) {
         setStatus('Sent: ' + text);
-        sparkLog('FULL_SEND: ' + text.substring(0, 200));
         sendText(text);
     } else {
-        setStatus('Nothing to send after stripping trigger');
+        setStatus('Ready...');
     }
 
-    // Start fresh
     mainChunks = [];
     if (mainRecorder && mainRecorder.state === 'recording') {
         try { mainRecorder.stop(); } catch(e) {}
@@ -741,141 +465,13 @@ async function sendFullRecording() {
 
 async function sendText(text) {
     try {
-        const res = await fetch('/api/voice-text', {
+        await fetch('/api/voice-text', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({text: text}),
         });
-        const data = await res.json();
-        if (data.error) setStatus('Error: ' + data.error);
-    } catch (e) {
-        setStatus('Error: ' + e.message);
-    }
+    } catch (e) { console.error(e); }
 }
-
-// --- Retry last ---
-async function retryLast() {
-    setStatus('Retrying...');
-    try {
-        const res = await fetch('/api/retry', {method: 'POST'});
-        const data = await res.json();
-        if (data.ok) setStatus('Retried: ' + data.text);
-        else setStatus('Nothing to retry');
-    } catch (e) {
-        setStatus('Retry failed: ' + e.message);
-    }
-}
-
-// --- Auto-approve ---
-let autoEnabled = false;
-let autoInterval = null;
-
-function toggleAuto() {
-    autoEnabled = !autoEnabled;
-    document.getElementById('auto-btn').classList.toggle('active', autoEnabled);
-    if (autoEnabled) {
-        pollScreen();
-    } else if (autoInterval) {
-        clearTimeout(autoInterval);
-        autoInterval = null;
-    }
-}
-
-async function pollScreen() {
-    if (!autoEnabled) return;
-    try {
-        const res = await fetch('/api/screen');
-        const data = await res.json();
-        if (data.waiting) {
-            sendKey('Enter');
-            setStatus('Auto: approved prompt');
-        }
-    } catch (e) {}
-    autoInterval = setTimeout(pollScreen, 2000);
-}
-
-// --- Speak text through the TTS endpoint ---
-async function speakText(text) {
-    try {
-        const ttsRes = await fetch('/api/tts', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({text}),
-        });
-        if (!ttsRes.ok) return;
-        const blob = await ttsRes.blob();
-        currentAudio = new Audio(URL.createObjectURL(blob));
-        isSpeaking = true;
-        document.getElementById('stop-btn').style.display = 'flex';
-        currentAudio.onended = () => {
-            isSpeaking = false;
-            currentAudio = null;
-            document.getElementById('stop-btn').style.display = 'none';
-            setStatus(listening ? 'Listening... say "now" to submit' : 'Ready');
-            playNextSpeech();
-        };
-        currentAudio.play();
-        setStatus('Speaking: ' + text.substring(0, 80));
-    } catch (e) {}
-}
-
-// --- Speech queue: events arrive once, so queue instead of dropping ---
-const speechQueue = [];
-
-function enqueueSpeech(text) {
-    if (!speakEnabled) return;
-    speechQueue.push(text);
-    playNextSpeech();
-}
-
-function playNextSpeech() {
-    if (isSpeaking || !speakEnabled || speechQueue.length === 0) return;
-    speakText(speechQueue.shift());
-}
-
-function cleanQuestion(text) {
-    return text
-        .split('\n')
-        .map(l => l.replace(/[│┌┐└┘├┤─━❯⎿●✻>]/g, ' ').trim())
-        .filter(l => l && !/^(esc to|tab to|\? for|ctrl\+)/i.test(l))
-        .join('. ')
-        .replace(/\s+/g, ' ')
-        .substring(0, 250)
-        .trim();
-}
-
-// --- Server-sent events: status, questions, speech pushed from the server ---
-let eventSource = null;
-
-function startEvents() {
-    if (eventSource) return;
-    eventSource = new EventSource('/api/events');
-
-    eventSource.addEventListener('speak', (e) => {
-        const data = JSON.parse(e.data);
-        if (data.text) enqueueSpeech(data.text);
-    });
-
-    eventSource.addEventListener('question', (e) => {
-        const data = JSON.parse(e.data);
-        const spoken = cleanQuestion(data.text || '');
-        if (spoken) {
-            sparkLog('QUESTION_ANNOUNCE: ' + spoken.substring(0, 100));
-            enqueueSpeech('Claude is asking: ' + spoken);
-        }
-    });
-
-    eventSource.addEventListener('status', (e) => {
-        const data = JSON.parse(e.data);
-        if (data.status === 'working') setStatus('Claude is working...');
-    });
-
-    eventSource.onerror = () => {
-        // EventSource auto-reconnects; just log it
-        sparkLog('SSE_RECONNECTING');
-    };
-}
-
 
 function switchSession(id) {
     fetch('/api/session', {
@@ -883,357 +479,74 @@ function switchSession(id) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({id}),
     }).then(() => {
-        // Clean navigate — no "leave site" prompt
-        window.onbeforeunload = null;
-        window.location.replace('/chat');
-    });
-}
-
-const SESSION_COLORS = {
-    dev: '#00bfff', nimbus: '#39ff14', alpha: '#fbbf24',
-    bravo: '#ff4444', charlie: '#bf5fff', delta: '#ff8800',
-};
-
-function setThemeColor(id) {
-    const c = SESSION_COLORS[id] || '#3b82f6';
-    document.documentElement.style.setProperty('--flame', c);
-    document.documentElement.style.setProperty('--flame-dim', c + '20');
-    document.documentElement.style.setProperty('--flame-mid', c + '40');
-}
-
-// --- Tabs: manual rename, per-tab color, reorder, hide/show ---
-const TAB_IDS = ['dev', 'nimbus', 'alpha', 'bravo', 'charlie', 'delta'];
-const ACTIVE_SESSION = '{{ session.id }}';
-let showHiddenTabs = false;
-
-// Default labels (numbers) — used on first load or after reset
-const TAB_DEFAULTS = {dev: '1', nimbus: '2', alpha: '3', bravo: '4', charlie: '5', delta: '6'};
-
-// Per-tab colors — each tab keeps its own color even when inactive
-const TAB_COLORS = {
-    dev: '#00bfff', nimbus: '#39ff14', alpha: '#fbbf24',
-    bravo: '#ff4444', charlie: '#bf5fff', delta: '#ff8800',
-};
-
-// Reset all stale tab labels on first visit (one-time migration)
-if (!localStorage.getItem('spark-tabs-v2')) {
-    TAB_IDS.forEach(id => {
-        localStorage.removeItem('tab-label-' + id);
-        localStorage.removeItem('tab-hidden-' + id);
-        localStorage.removeItem('tab-lastused-' + id);
-        localStorage.removeItem('tab-manual-' + id);
-    });
-    localStorage.removeItem('spark-tab-order');
-    localStorage.setItem('spark-tabs-v2', '1');
-}
-
-// Tab names are server-side (sessions.json) so they sync across devices.
-// One-time migration: push any old localStorage renames up to the server.
-if (!localStorage.getItem('spark-tabs-v3')) {
-    TAB_IDS.forEach(id => {
-        const old = localStorage.getItem('tab-label-' + id);
-        if (old) {
-            fetch('/api/session/rename', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id, name: old}),
-            }).catch(() => {});
-            localStorage.removeItem('tab-label-' + id);
-        }
-    });
-    localStorage.setItem('spark-tabs-v3', '1');
-}
-
-function getTabLabel(id) {
-    return getSessionInfo(id).name || TAB_DEFAULTS[id] || id;
-}
-
-async function setTabLabel(id, label) {
-    try {
-        await fetch('/api/session/rename', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({id, name: label}),
+        // All 3 iframes preloaded — just toggle visibility
+        document.querySelectorAll('.terminal-frame').forEach(f => {
+            f.style.display = f.id === 'term-' + id ? '' : 'none';
         });
-        const s = _sessions.find(x => x.id === id);
-        if (s) s.name = label;
-        localStorage.setItem('spark-sessions-cache', JSON.stringify(_sessions));
-    } catch(e) {}
-    renderTabs();
+        ACTIVE_SESSION = id;
+        renderTabs();
+    });
 }
 
-function getTabOrder() {
-    const stored = localStorage.getItem('spark-tab-order');
-    if (stored) {
-        try {
-            const order = JSON.parse(stored);
-            // Merge any missing IDs
-            TAB_IDS.forEach(id => { if (!order.includes(id)) order.push(id); });
-            return order.filter(id => TAB_IDS.includes(id));
-        } catch(e) {}
-    }
-    return [...TAB_IDS];
-}
+let ACTIVE_SESSION = '{{ session.id }}';
 
-function setTabOrder(order) {
-    localStorage.setItem('spark-tab-order', JSON.stringify(order));
-    renderTabs();
-}
-
-function isTabHidden(id) {
-    return localStorage.getItem('tab-hidden-' + id) === '1';
-}
-
-function setTabHidden(id, hidden) {
-    if (hidden) localStorage.setItem('tab-hidden-' + id, '1');
-    else localStorage.removeItem('tab-hidden-' + id);
-    // Server-side too: removes it from /talk feed, resets name + conversation
-    fetch('/api/session/hide', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id, hidden}),
-    }).catch(() => {});
-    renderTabs();
-}
-
-function getVisibleTabs() {
-    return getTabOrder().filter(id => !isTabHidden(id));
-}
-
-function getHiddenTabs() {
-    return getTabOrder().filter(id => isTabHidden(id));
-}
-
-function getSessionInfo(id) {
-    return _sessions.find(s => s.id === id) || {};
-}
-
-function createTabButton(id, isHidden) {
+function createTabButton(s) {
     const btn = document.createElement('button');
-    btn.className = 'tab-btn' + (isHidden ? ' hidden-tab' : '');
-    btn.id = 'tab-' + id;
-    btn.textContent = getTabLabel(id);
+    btn.className = 'btn tab-btn';
+    if (s.id === ACTIVE_SESSION) btn.classList.add('active');
 
-    // Second line: live status (what the session is doing right now)
-    const liveInfo = getSessionInfo(id);
-    if (!isHidden && liveInfo.small && liveInfo.small !== 'inactive') {
-        btn.textContent = '';
-        const top = document.createElement('div');
-        top.textContent = getTabLabel(id);
-        const sub = document.createElement('div');
-        sub.className = 'tab-sub';
-        sub.textContent = liveInfo.small;
-        btn.appendChild(top);
-        btn.appendChild(sub);
+    const nameDiv = document.createElement('div');
+    nameDiv.innerText = s.name || s.id;
+    btn.appendChild(nameDiv);
+
+    if (!s.alive && s.id !== ACTIVE_SESSION) {
+        btn.style.opacity = '0.5';
     }
 
-    const color = TAB_COLORS[id] || '#3b82f6';
-    if (id === ACTIVE_SESSION && !isHidden) {
-        btn.classList.add('active');
-        btn.style.background = color;
-        btn.style.borderColor = color;
-        btn.style.color = '#fff';
-    } else if (!isHidden) {
-        // Inactive tabs get a subtle tint of their color
-        btn.style.borderColor = color + '80';
-        btn.style.color = color;
-    }
+    btn.onclick = () => switchSession(s.id);
 
-    // Dim tabs whose terminal is just sitting at a shell (nothing running)
-    const info = getSessionInfo(id);
-    if (info.id && !info.alive && id !== ACTIVE_SESSION) {
-        btn.style.opacity = '0.45';
-    }
-
-    // Single tap = switch, double tap = hide (or unhide for hidden tabs)
-    let tapTimer = null;
-    btn.onclick = () => {
-        if (tapTimer) {
-            clearTimeout(tapTimer);
-            tapTimer = null;
-            if (!isHidden) {
-                setTabHidden(id, true);
-                setStatus('Hid tab ' + getTabLabel(id));
-            }
-            return;
-        }
-        tapTimer = setTimeout(() => {
-            tapTimer = null;
-            if (isHidden) setTabHidden(id, false);
-            switchSession(id);
-        }, 300);
+    btn.oncontextmenu = (e) => {
+        e.preventDefault();
+        const name = prompt(`Rename tab:`, s.name);
+        if (name && name.trim()) renameSession(s.id, name.trim());
     };
-
-    // Long-press / right-click for menu
-    let lpt = null;
-    btn.addEventListener('touchstart', (e) => {
-        lpt = setTimeout(() => {
-            e.preventDefault();
-            tabContextMenu(id);
-        }, 600);
-    }, {passive: false});
-    btn.addEventListener('touchend', () => clearTimeout(lpt));
-    btn.addEventListener('touchmove', () => clearTimeout(lpt));
-    btn.addEventListener('contextmenu', (e) => { e.preventDefault(); tabContextMenu(id); });
 
     return btn;
 }
 
-function tabContextMenu(id) {
-    const order = getTabOrder();
-    const pos = order.indexOf(id) + 1;
-    const total = order.length;
-    const action = prompt(
-        `Tab: ${getTabLabel(id)} (pos ${pos}/${total})\n\n` +
-        `• Type a name to rename\n` +
-        `• "hide" to hide\n` +
-        `• A number (1-${total}) to move to that position`,
-        getTabLabel(id)
-    );
-    if (action === null) return;
-    const trimmed = action.trim();
-    if (!trimmed) return;
-
-    if (trimmed.toLowerCase() === 'hide') {
-        setTabHidden(id, true);
-    } else if (/^\d+$/.test(trimmed)) {
-        // Reorder: move tab to position N
-        const newPos = Math.max(1, Math.min(total, parseInt(trimmed, 10))) - 1;
-        const newOrder = order.filter(x => x !== id);
-        newOrder.splice(newPos, 0, id);
-        setTabOrder(newOrder);
-    } else {
-        setTabLabel(id, trimmed);
-    }
+async function renameSession(id, name) {
+    if (!name) return;
+    try {
+        await fetch('/api/session/rename', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({id, name}),
+        });
+        refreshSessions();
+    } catch(e) {}
 }
 
 function renderTabs() {
     const bar = document.getElementById('tab-bar');
-    const hiddenBar = document.getElementById('hidden-tabs');
     bar.innerHTML = '';
-    hiddenBar.innerHTML = '';
-
-    const visible = getVisibleTabs();
-    const hidden = getHiddenTabs();
-
-    visible.forEach(id => bar.appendChild(createTabButton(id, false)));
-
-    // "+" button: pick CLI type, then name it
-    const plus = document.createElement('button');
-    plus.className = 'tab-btn more-btn';
-    plus.textContent = '+';
-    plus.onclick = () => {
-        showHiddenTabs = !showHiddenTabs;
-        hiddenBar.style.display = showHiddenTabs ? 'flex' : 'none';
-    };
-    bar.appendChild(plus);
-
-    const CLIS = [
-        {id: 'claude', label: 'Claude', color: '#d97706'},
-        {id: 'gemini', label: 'Gemini', color: '#3b82f6'},
-    ];
-    CLIS.forEach(c => {
-        const b = document.createElement('button');
-        b.className = 'tab-btn';
-        b.textContent = c.label;
-        b.style.borderColor = c.color + '80';
-        b.style.color = c.color;
-        b.onclick = () => launchCli(c.id);
-        hiddenBar.appendChild(b);
-    });
-
-    hiddenBar.style.display = showHiddenTabs ? 'flex' : 'none';
-
-    setThemeColor(ACTIVE_SESSION);
+    _sessions.forEach(s => bar.appendChild(createTabButton(s)));
 }
-
-async function launchCli(cli) {
-    // Prompt for a name first
-    const name = prompt(`Name for this ${cli} session:`, '');
-    if (!name || !name.trim()) return;
-
-    // Refresh live state so the picker shows what's running where
-    try {
-        const r = await fetch('/api/sessions');
-        _sessions = (await r.json()).sessions;
-    } catch(e) {}
-
-    // Auto-pick first free tab, or least recently used if all busy
-    let target = _sessions.find(s => !s.alive);
-    if (!target) {
-        target = [..._sessions].sort((a, b) =>
-            (a.last_used || '') < (b.last_used || '') ? -1 : 1
-        )[0];
-    }
-
-    setStatus('Launching ' + cli + ' as ' + name.trim() + '...');
-    try {
-        const res = await fetch('/api/session/launch', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({id: target.id, cli}),
-        });
-        if (res.ok) {
-            // Rename the tab to the user's chosen name
-            await fetch('/api/session/rename', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id: target.id, name: name.trim()}),
-            });
-            setTabLabel(target.id, name.trim());
-            setTabHidden(target.id, false);
-            switchSession(target.id);
-        } else {
-            const data = await res.json();
-            setStatus('Launch failed: ' + (data.error || res.status));
-        }
-    } catch(e) {
-        setStatus('Launch failed: ' + e.message);
-    }
-}
-
-// Persist speaker state across page reloads
-if (localStorage.getItem('speakEnabled') === 'true') {
-    speakEnabled = true;
-    document.addEventListener('DOMContentLoaded', () => {
-        document.getElementById('speak-icon').textContent = '🔊';
-    });
-}
-
-// Release mic when page is hidden (tab switch, alt-tab); re-acquire when visible
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-        if (listening) stopListening();
-    } else {
-        if (!listening) toggleListening();
-    }
-});
-
-// Render tabs immediately (script runs at end of body — DOM is ready).
-// Use cached session state so alive-dimming is instant, then refresh in background.
-try {
-    _sessions = JSON.parse(localStorage.getItem('spark-sessions-cache') || '[]');
-} catch(e) {}
-renderTabs();
 
 async function refreshSessions() {
     try {
         const res = await fetch('/api/sessions');
         const data = await res.json();
         _sessions = data.sessions;
-        localStorage.setItem('spark-sessions-cache', JSON.stringify(_sessions));
         renderTabs();
     } catch(e) {}
 }
-refreshSessions();
-setInterval(refreshSessions, 10000);  // keep tab names + statuses live
 
-// Heavy startup (mic, TTS) still waits for full page load
 window.addEventListener('load', () => {
-    startEvents();
-    // Auto-start mic on page load
+    refreshSessions();
     if (!listening) toggleListening();
 });
+
+setInterval(refreshSessions, 10000);
 
 </script>
 </body>

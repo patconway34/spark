@@ -76,15 +76,16 @@ Two rows of key buttons (Esc, Tab, Enter, ^C, ^Z, ^D, arrows, Yes, No) plus numb
 
 ## Dependencies
 
-- puente (ttyd terminal at terminal.tradingdata.net)
-- ventana/transcribe.py (Groq Whisper)
-- mente/simple.py (summarization for long responses)
-- gTTS (text-to-speech)
+- tmux + ttyd (terminal multiplexer + web terminal)
+- Groq Whisper API (speech-to-text via transcribe.py)
+- Claude Agent SDK (optional — summarization for long responses)
+- gTTS / edge-tts (text-to-speech)
 
 ## Story
 
-2026-06-10 — /talk became the command center: six status cards (folder names on top, big goal sentence via Mente, immediate action below, or Inactive), question queue on top, mic with level readout and transcript preview, "hey alpha ..." voice routing with still-point check (won't interrupt a working session). Background feed thread scans all panes every 5s (/api/feed). Note: start.bat only restarts tmux/ttyd — the Flask app must be restarted separately (python app.py kills the old port holder itself).
-2026-06-10 — Multi-session question queue on /talk. Spark now watches all six tmux sessions, catches permission prompts and questions from any of them, and shows one at a time in a color-coded card (answer with 1/2/3/Enter/Esc, type a reply, or skip). Answers route back to the right session via tmux send-keys. New routes: /api/questions, /api/questions/answer.
+2026-06-13 — Stabilization: cut from 6 sessions to 3 (Dev, Alpha, Bravo). Killed the background feed loop that was scanning all panes every 5s and calling mente for AI summaries — this was the CPU hog causing fan spin. Removed /talk command center, /api/feed, /api/send, /api/questions, question queue. Spark is now lobby + chat with 3 tabs, no background threads.
+2026-06-10 — /talk became the command center: six status cards. Background feed thread scans all panes every 5s (/api/feed).
+2026-06-10 — Multi-session question queue on /talk.
 2026-05-31 — Documented full voice flow, trigger word, volume detection, and command map.
 2026-05-30 — Added dual STT: Browser (Web Speech API, always-on with "go" trigger) and Groq Whisper (push-to-talk via ventana/transcribe.py). Browser STT disabled (doesn't work on mobile). Cleaned up: removed hook-based prototype, pivoted to terminal-wrapping via puente's SSH session.
 2026-05-29 — Project created. Hook-based prototype built and tested. gTTS + Telegram delivery confirmed working. Hooks proved unreliable for real-time voice.

@@ -9,7 +9,7 @@
 <body>
 
 {% for s in sessions %}
-<iframe id="term-{{ s.id }}" class="terminal-frame" src="{{ s.terminal_url }}" style="{% if s.id != session.id %}display:none;{% endif %}"></iframe>
+<iframe id="term-{{ s.id }}" class="terminal-frame" data-local="{{ s.local_url }}" data-remote="{{ s.remote_url }}" style="{% if s.id != session.id %}display:none;{% endif %}"></iframe>
 {% endfor %}
 
 <div id="status-bar">Tap mic to start listening</div>
@@ -53,6 +53,14 @@
 </div>
 
 <script>
+// --- Set terminal iframe URLs based on local vs remote access ---
+(function() {
+    const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
+    document.querySelectorAll('.terminal-frame').forEach(f => {
+        f.src = isLocal ? f.dataset.local : f.dataset.remote;
+    });
+})();
+
 // --- State ---
 window.addEventListener('beforeunload', () => {
     if (typeof audioStream !== 'undefined' && audioStream) {

@@ -48,16 +48,16 @@ logging.basicConfig(level=logging.INFO,
 PORT = 5023
 HOST = "0.0.0.0"
 
-# Terminal base URL — default to localhost ttyd
-_TERMINAL_BASE = os.getenv("SPARK_TERMINAL_URL", "http://localhost")
-
 SESSIONS = [
     {"id": "dev", "name": "Dev", "tmux": "claude", "ttyd_port": 7682,
-     "terminal_url": f"{_TERMINAL_BASE}:7682"},
+     "local_url": "http://localhost:7682",
+     "remote_url": "https://terminal.tradingdata.net"},
     {"id": "alpha", "name": "Alpha", "tmux": "claude2", "ttyd_port": 7683,
-     "terminal_url": f"{_TERMINAL_BASE}:7683"},
+     "local_url": "http://localhost:7683",
+     "remote_url": "https://terminal2.tradingdata.net"},
     {"id": "bravo", "name": "Bravo", "tmux": "claude3", "ttyd_port": 7684,
-     "terminal_url": f"{_TERMINAL_BASE}:7684"},
+     "local_url": "http://localhost:7684",
+     "remote_url": "https://terminal3.tradingdata.net"},
 ]
 
 # In-memory state

@@ -99,7 +99,7 @@ let totalTicks = 0;        // total silent seconds in current quiet stretch
 let pendingCommas = 0;     // commas to prepend to next transcript chunk
 let transcriptParts = [];  // accumulates text + commas between keyword checks
 
-const VOLUME_THRESHOLD = 10;
+const VOLUME_THRESHOLD = 18;
 const SILENCE_SECONDS = 2;  // seconds of silence before checking clip
 
 function sparkLog(msg) {
@@ -363,11 +363,22 @@ async function checkClipForKeyword() {
         const data = await res.json();
         if (data.text) {
             const heard = data.text.trim().toLowerCase();
+            const cleaned = heard.replace(/[^a-z ]/g, '').trim().replace(/\s*thank you\s*$/g, '').trim();
+
+            // Discard Whisper hallucinations (phantom phrases on near-silent clips)
+            const PHANTOMS = ['thank you', 'thanks', 'thanks for watching', 'you', 'bye',
+                'the end', 'okay', 'so', 'hmm', 'uh', 'um', 'ah', 'subscribe',
+                'like and subscribe', 'thank you for watching', ''];
+            if (PHANTOMS.includes(cleaned)) {
+                sparkLog('PHANTOM_DISCARD: ' + heard);
+                processing = false;
+                if (listening) startNewClip();
+                return;
+            }
+
             const commaPrefix = pendingCommas > 0 ? ', '.repeat(pendingCommas) : '';
             pendingCommas = 0;
             transcriptParts.push(commaPrefix + heard);
-
-            const cleaned = heard.replace(/[^a-z ]/g, '').trim().replace(/\s*thank you\s*$/g, '').trim();
             const words = cleaned.split(/\s+/);
 
             const goAheadMatch = cleaned.match(/\bgo\s+ahead\b/);

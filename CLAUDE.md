@@ -4,67 +4,32 @@ Voice layer for Claude Code sessions. Adds voice input (Groq Whisper) and voice 
 
 ## STT
 
-**Groq only** — Groq Whisper Large v3 Turbo via `ventana/transcribe.py`. Uses `GROQ_API_KEY` from `ventana/.env`. Free tier: 2,000 req/day. Browser Web Speech API code is preserved but disabled (doesn't work on mobile).
+**Groq only** — Groq Whisper Large v3 Turbo via `ventana/transcribe.py`. Uses `GROQ_API_KEY` from `ventana/.env`. Free tier: 2,000 req/day.
 
 ## Architecture
 
-Phone (browser) → voice recording → Groq Whisper STT → keystrokes into Claude's tmux session → read transcript JSONL → gTTS → audio playback
+Phone (browser) → push-to-talk recording → Groq Whisper STT → keystrokes into Claude's tmux session.
 
 Key constraint: Claude Code must run interactively (not --print mode) to support permission prompts. So spark wraps the existing puente SSH session rather than spawning its own CLI process.
 
-## Voice Input Flow
+## Voice Input Flow — Push-to-Talk
 
 ```
-Tap mic (purple) → mic turns green (listening)
+Tap MIC (or Bluetooth clicker) → button turns red, recording starts
   │
-  ├── Recording starts immediately (MediaRecorder, always rolling)
-  ├── Volume monitor starts (Web Audio API, checks every 100ms)
-  │
-  │   Volume > 20 → "talking" → mic turns red (recording), silence timer cancelled
-  │   Volume < 20 after talking → silence timer starts (3 seconds)
-  │
-  │   After 3s silence:
-  │     ├── Stop current recording
-  │     ├── Send audio blob to /api/transcribe (Groq Whisper)
-  │     ├── Groq returns text
-  │     │
-  │     ├── Last word is "go ahead"? → strip "go ahead", send text to Claude via tmux
-  │     └── Last word is NOT "go ahead"? → discard, keep listening
-  │
-  │     Start new recording for next utterance
-  │
-  └── Tap mic again → mic off, recording stops, volume monitor stops
+  └── Tap again → recording stops → audio sent to Groq → transcript sent to Claude
 ```
 
-## Trigger Phrase: "go ahead"
+No trigger words, no volume detection, no silence timers. Pure manual control.
 
-- **"go ahead"** anywhere in a clip sends the full accumulated transcript to Claude
-- Voice commands ("press enter", "send yes") fire immediately — no "go ahead" needed
-- If neither trigger is detected, the clip is accumulated and spark keeps listening
-- This cleanly separates commands (instant) from dictation (requires "go ahead")
-
-## Voice Commands
-
-Only enter and escape are voice commands. Everything else is manual buttons.
-
-| Say | Sends |
-|-----|-------|
-| press enter | Enter |
-| press escape | Escape |
-| go back / go home | Main menu |
-
-## TTS (Voice Output)
-
-- Disabled by default (speaker icon shows muted)
-- Tap speaker icon to enable → polls `/api/latest` every 1s
-- Reads the latest assistant message from the Claude transcript JSONL
-- Long responses (>300 chars) get summarized by mente before speaking
-- Stop button appears during playback — tap to silence
-- During TTS playback, volume monitor pauses (so it doesn't hear itself)
+Bluetooth clicker support: pairs as `volumeup` keypress, JS listener catches it and toggles mic.
 
 ## Button Controls
 
-Two rows of key buttons (Esc, Tab, Enter, ^C, ^Z, ^D, arrows, Yes, No) plus number row (1, 2, 3). Bottom bar: stop button (red, hidden until speaking), mic button (purple/green/red), speaker toggle.
+Row 1: Hamburger (utility keys) | PgUp | PgDn | Session tabs
+Row 2: ESC | MIC | ENTER
+
+Hamburger contains: /new, Tab, Shift-Tab, Up, Down, ^C, ^Z, Screenshot.
 
 ## Files
 
@@ -83,6 +48,7 @@ Two rows of key buttons (Esc, Tab, Enter, ^C, ^Z, ^D, arrows, Yes, No) plus numb
 
 ## Story
 
+2026-06-24 — Push-to-talk rewrite. Ripped out volume monitoring, clip recording, keyword scanning, silence detection, phantom filtering, "go ahead" trigger. Replaced with simple toggle: tap MIC → record → tap again → transcribe → send. Added Bluetooth clicker support (volumeup key). Mic button moved to main row (ESC | MIC | ENTER). ~400 lines of voice JS reduced to ~50.
 2026-06-13 — Stabilization: cut from 6 sessions to 3 (Dev, Alpha, Bravo). Killed the background feed loop that was scanning all panes every 5s and calling mente for AI summaries — this was the CPU hog causing fan spin. Removed /talk command center, /api/feed, /api/send, /api/questions, question queue. Spark is now lobby + chat with 3 tabs, no background threads.
 2026-06-10 — /talk became the command center: six status cards. Background feed thread scans all panes every 5s (/api/feed).
 2026-06-10 — Multi-session question queue on /talk.

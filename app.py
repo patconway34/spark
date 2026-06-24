@@ -9,7 +9,9 @@ import logging
 import os
 import signal
 import subprocess
+import threading
 import time
+from datetime import datetime
 from pathlib import Path
 import platform
 
@@ -19,6 +21,9 @@ from flask import Flask, jsonify, make_response, render_template, request
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
 from transcribe import transcribe_audio
+
+# Windows Python for subprocess calls (mente, buzz, yarn)
+_WIN_PYTHON = r"C:\Users\Patrick\miniconda3\python.exe" if platform.system() == "Windows" else "/mnt/c/Users/Patrick/miniconda3/python.exe"
 
 # --- App setup ---
 
@@ -139,7 +144,8 @@ def _pane_info():
         result = subprocess.run(
             _tmux_cmd("list-panes", "-a", "-F",
              "#{session_name}\t#{pane_current_command}\t#{pane_current_path}"),
-            capture_output=True, timeout=10, text=True,
+            capture_output=True, timeout=10,
+            encoding="utf-8", errors="replace",
         )
         if result.returncode != 0:
             return {}
@@ -281,6 +287,125 @@ def scroll():
         subprocess.run(_tmux_cmd("send-keys", "-t", tmux, "-X", "page-up"), capture_output=True, timeout=15)
     else:
         subprocess.run(_tmux_cmd("copy-mode", "-q", "-t", tmux), capture_output=True, timeout=15)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/screenshot", methods=["POST"])
+def screenshot():
+    tmux = get_session()["tmux"]
+    result = subprocess.run(
+        _tmux_cmd("capture-pane", "-t", tmux, "-p"),
+        capture_output=True, timeout=15,
+        encoding="utf-8", errors="replace",
+    )
+    text = (result.stdout or "").rstrip()
+    return jsonify({"ok": True, "text": text})
+
+
+@app.route("/api/screenshot/save", methods=["POST"])
+def screenshot_save():
+    """Capture visible pane and save to C:/dev/."""
+    tmux = get_session()["tmux"]
+    result = subprocess.run(
+        _tmux_cmd("capture-pane", "-t", tmux, "-p"),
+        capture_output=True, timeout=15,
+        encoding="utf-8", errors="replace",
+    )
+    text = (result.stdout or "").rstrip()
+    if not text:
+        return jsonify({"ok": False, "error": "Empty capture"}), 400
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"screenshot_{ts}.txt"
+
+    def _write():
+        for base in [Path("C:/dev"), Path("/mnt/c/dev")]:
+            try:
+                (base / filename).write_text(text, encoding="utf-8")
+                logging.info(f"SCREENSHOT_SAVE: {base / filename}")
+                return
+            except Exception:
+                continue
+        logging.error("SCREENSHOT_SAVE: all write paths failed")
+
+    threading.Thread(target=_write, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+def _capture_scrollback(lines=200):
+    """Capture last N lines of scrollback from active tmux session."""
+    tmux = get_session()["tmux"]
+    result = subprocess.run(
+        _tmux_cmd("capture-pane", "-t", tmux, "-p", "-S", f"-{lines}"),
+        capture_output=True, timeout=15,
+        encoding="utf-8", errors="replace",
+    )
+    return (result.stdout or "").strip()
+
+
+def _write_scrollback(text):
+    """Write scrollback to temp file. Returns (local_path, windows_path)."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Try Windows path first, fall back to WSL path
+    for base in [Path("C:/dev/spark"), Path("/mnt/c/dev/spark")]:
+        try:
+            tmp = base / f"_scrollback_{ts}.txt"
+            tmp.write_text(text, encoding="utf-8")
+            win_path = f"C:/dev/spark/_scrollback_{ts}.txt"
+            return tmp, win_path
+        except Exception:
+            continue
+    raise RuntimeError("Cannot write scrollback temp file")
+
+
+@app.route("/api/text-me", methods=["POST"])
+def text_me():
+    """Capture scrollback, summarize via mente, SMS via buzz."""
+    text = _capture_scrollback()
+    if not text:
+        return jsonify({"ok": False, "error": "Nothing to capture"}), 400
+    tmp, win_tmp = _write_scrollback(text)
+
+    def _do():
+        try:
+            result = subprocess.run(
+                [_WIN_PYTHON, "C:/dev/spark/notify.py", "text", win_tmp],
+                capture_output=True, timeout=120,
+                encoding="utf-8", errors="replace",
+            )
+            logging.info(f"TEXT_ME: {result.stdout.strip()}")
+            if result.returncode != 0:
+                logging.error(f"TEXT_ME_ERR: {result.stderr.strip()}")
+        finally:
+            try: tmp.unlink(missing_ok=True)
+            except Exception: pass
+
+    threading.Thread(target=_do, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/play-me", methods=["POST"])
+def play_me():
+    """Capture scrollback, summarize as Alan Watts, TTS + Telegram."""
+    text = _capture_scrollback()
+    if not text:
+        return jsonify({"ok": False, "error": "Nothing to capture"}), 400
+    tmp, win_tmp = _write_scrollback(text)
+
+    def _do():
+        try:
+            result = subprocess.run(
+                [_WIN_PYTHON, "C:/dev/spark/notify.py", "play", win_tmp],
+                capture_output=True, timeout=180,
+                encoding="utf-8", errors="replace",
+            )
+            logging.info(f"PLAY_ME: {result.stdout.strip()}")
+            if result.returncode != 0:
+                logging.error(f"PLAY_ME_ERR: {result.stderr.strip()}")
+        finally:
+            try: tmp.unlink(missing_ok=True)
+            except Exception: pass
+
+    threading.Thread(target=_do, daemon=True).start()
     return jsonify({"ok": True})
 
 

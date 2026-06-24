@@ -17,7 +17,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_MODEL = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
-ALLOWED_LANGUAGES = {"en", "es", "english", "spanish"}
+ALLOWED_LANGUAGES = {"en", "english"}
 
 
 class TranscriptionUnavailable(RuntimeError):

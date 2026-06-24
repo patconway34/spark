@@ -1,30 +1,30 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-    /* Colors */
-    --bg: #0d0d12;
-    --surface: #16161e;
-    --surface-bright: #1c1c26;
-    --border: rgba(255, 255, 255, 0.08);
-    --border-strong: rgba(255, 255, 255, 0.15);
-    
-    --text: #e2e8f0;
-    --text-dim: #94a3b8;
-    --text-muted: #64748b;
-    
+    /* Colors — light theme */
+    --bg: #f0f0f0;
+    --surface: #ffffff;
+    --surface-bright: #f5f5f5;
+    --border: rgba(0, 0, 0, 0.1);
+    --border-strong: rgba(0, 0, 0, 0.2);
+
+    --text: #1a1a1a;
+    --text-dim: #555555;
+    --text-muted: #888888;
+
     --accent: #3b82f6;
-    --accent-dim: rgba(59, 130, 246, 0.2);
-    --accent-glow: rgba(59, 130, 246, 0.4);
-    
-    --success: #10b981;
-    --danger: #ef4444;
-    --warning: #f59e0b;
-    
+    --accent-dim: rgba(59, 130, 246, 0.15);
+    --accent-glow: rgba(59, 130, 246, 0.3);
+
+    --success: #059669;
+    --danger: #dc2626;
+    --warning: #d97706;
+
     /* Layout */
     --safe-bottom: env(safe-area-inset-bottom, 80px);
     --header-height: 1.6rem;
-    --control-bg: rgba(13, 13, 18, 0.85);
-    
+    --control-bg: rgba(245, 245, 245, 0.95);
+
     /* Fonts */
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
@@ -45,30 +45,19 @@ body {
 }
 
 /* Terminal Container */
-.terminal-frame {
+.terminal-wrap {
     flex: 1;
-    border: none;
-    width: 100%;
-    background: #000;
+    position: relative;
+    overflow: hidden;
 }
 
-/* Status Bar */
-#status-bar {
-    padding: 0.4rem 0.75rem;
-    background: var(--surface);
-    border-top: 1px solid var(--border);
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    height: var(--header-height);
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 500;
+.terminal-frame {
+    width: 100%;
+    height: calc(100% + 25px);
+    border: none;
+    background: var(--theme-bg, #f0f0f0);
 }
+
 
 /* Controls Section */
 #controls {
@@ -82,7 +71,7 @@ body {
     flex-direction: column;
     gap: 0.6rem;
     flex-shrink: 0;
-    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
 }
 
 .key-row {
@@ -135,14 +124,14 @@ body {
 }
 
 .btn-esc {
-    background: rgba(239, 68, 68, 0.1);
-    border-color: rgba(239, 68, 68, 0.3);
+    background: rgba(220, 38, 38, 0.08);
+    border-color: rgba(220, 38, 38, 0.25);
     color: var(--danger);
 }
 
 .btn-enter {
-    background: rgba(16, 185, 129, 0.1);
-    border-color: rgba(16, 185, 129, 0.3);
+    background: rgba(5, 150, 105, 0.08);
+    border-color: rgba(5, 150, 105, 0.25);
     color: var(--success);
 }
 
@@ -152,36 +141,32 @@ body {
     border-radius: 50%;
 }
 
-#mic-btn {
-    width: 60px;
-    height: 60px;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    box-shadow: 0 4px 15px var(--accent-dim);
+.ham-yes {
+    background: rgba(5, 150, 105, 0.1) !important;
+    border-color: rgba(5, 150, 105, 0.3) !important;
+    color: var(--success) !important;
 }
 
-#mic-btn.listening {
-    background: var(--success);
+.ham-no {
+    background: rgba(220, 38, 38, 0.1) !important;
+    border-color: rgba(220, 38, 38, 0.3) !important;
+    color: var(--danger) !important;
+}
+
+.btn-mic {
+    flex: 1;
+    height: 50px;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: 0.05em;
 }
 
 #mic-btn.recording {
     background: var(--danger);
+    border-color: var(--danger);
     animation: pulse 1.5s infinite;
-}
-
-#stop-btn {
-    background: var(--danger);
-    color: #fff;
-    border: none;
-    display: none;
-}
-
-#send-btn.has-text {
-    background: var(--success);
-    color: #fff;
-    border-color: transparent;
-    animation: pulse 2s infinite;
 }
 
 /* Tabs */
@@ -301,6 +286,32 @@ body {
 
 #rename-cancel { background: var(--surface-bright); color: var(--text-dim); }
 #rename-save { background: var(--accent); color: #fff; }
+
+/* Session themes — terminal, tabs, and bottom buttons all match */
+
+/* Dev — GREEN */
+body.theme-dev { --theme: #059669; --theme-bg: #d4edda; --theme-dim: rgba(5, 150, 105, 0.15); }
+body.theme-dev .tab-btn.active { background: #059669; border-color: #059669; color: #fff; }
+body.theme-dev .btn-esc { background: var(--theme-dim); border-color: rgba(5,150,105,0.3); color: var(--theme); }
+body.theme-dev .btn-mic { background: #059669; border-color: #059669; }
+body.theme-dev .btn-enter { background: var(--theme-dim); border-color: rgba(5,150,105,0.3); color: var(--theme); }
+body.theme-dev #controls { border-top-color: rgba(5,150,105,0.3); }
+
+/* Alpha — RED */
+body.theme-alpha { --theme: #dc2626; --theme-bg: #f8d7da; --theme-dim: rgba(220, 38, 38, 0.12); }
+body.theme-alpha .tab-btn.active { background: #dc2626; border-color: #dc2626; color: #fff; }
+body.theme-alpha .btn-esc { background: var(--theme-dim); border-color: rgba(220,38,38,0.3); color: var(--theme); }
+body.theme-alpha .btn-mic { background: #dc2626; border-color: #dc2626; }
+body.theme-alpha .btn-enter { background: var(--theme-dim); border-color: rgba(220,38,38,0.3); color: var(--theme); }
+body.theme-alpha #controls { border-top-color: rgba(220,38,38,0.3); }
+
+/* Bravo — BLUE */
+body.theme-bravo { --theme: #1a73e8; --theme-bg: #cce5ff; --theme-dim: rgba(26, 115, 232, 0.12); }
+body.theme-bravo .tab-btn.active { background: #1a73e8; border-color: #1a73e8; color: #fff; }
+body.theme-bravo .btn-esc { background: var(--theme-dim); border-color: rgba(26,115,232,0.3); color: var(--theme); }
+body.theme-bravo .btn-mic { background: #1a73e8; border-color: #1a73e8; }
+body.theme-bravo .btn-enter { background: var(--theme-dim); border-color: rgba(26,115,232,0.3); color: var(--theme); }
+body.theme-bravo #controls { border-top-color: rgba(26,115,232,0.3); }
 
 /* Animations */
 @keyframes pulse {

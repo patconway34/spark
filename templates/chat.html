@@ -4,56 +4,65 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
     <title>Spark</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.7">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.5">
 </head>
 <body>
 
 {% for s in sessions %}
-<iframe id="term-{{ s.id }}" class="terminal-frame" data-local="{{ s.local_url }}" data-remote="{{ s.remote_url }}" style="{% if s.id != session.id %}display:none;{% endif %}"></iframe>
+<div class="terminal-wrap" id="wrap-{{ s.id }}" style="{% if s.id != session.id %}display:none;{% endif %}">
+<iframe id="term-{{ s.id }}" class="terminal-frame" data-local="{{ s.local_url }}" data-remote="{{ s.remote_url }}"></iframe>
+</div>
 {% endfor %}
 
-<div id="status-bar">Tap mic to start listening</div>
-
 <div id="controls">
-    <!-- Hamburger menu (hidden by default) -->
+    <!-- Hamburger menu -->
     <div id="hamburger-panel" style="display:none; flex-wrap:wrap; gap:0.2rem; padding:0.2rem 0.4rem; justify-content:center;">
-        <button id="mic-btn" class="btn key-btn" onclick="toggleListening()" style="height:28px;font-size:0.6rem;">
-            🎙 Mic
-        </button>
-        <button class="btn key-btn" onclick="sendSlashNew()" style="height:28px;font-size:0.6rem;font-weight:600;">/new</button>
+        <!-- Claude Code commands -->
+        <button class="btn key-btn ham-yes" onclick="sendCommand('yes')" style="height:28px;font-size:0.6rem;font-weight:600;">Yes</button>
+        <button class="btn key-btn ham-no" onclick="sendCommand('no')" style="height:28px;font-size:0.6rem;font-weight:600;">No</button>
+        <button class="btn key-btn" onclick="sendCommand('/new')" style="height:28px;font-size:0.6rem;font-weight:600;">/new</button>
+        <button class="btn key-btn" onclick="sendCommand('/compact')" style="height:28px;font-size:0.6rem;font-weight:600;">/compact</button>
+        <!-- Navigation -->
         <button class="btn key-btn" onclick="sendKey('Tab')" style="height:28px;font-size:0.6rem;">Tab</button>
         <button class="btn key-btn" onclick="sendKey('BTab')" style="height:28px;font-size:0.6rem;">⇧Tab</button>
         <button class="btn key-btn" onclick="sendKey('Up')" style="height:28px;font-size:0.6rem;">▲</button>
         <button class="btn key-btn" onclick="sendKey('Down')" style="height:28px;font-size:0.6rem;">▼</button>
+        <!-- Control -->
         <button class="btn key-btn" onclick="sendKey('C-c')" style="height:28px;font-size:0.6rem;">^C</button>
         <button class="btn key-btn" onclick="sendKey('C-z')" style="height:28px;font-size:0.6rem;">^Z</button>
+        <!-- Numbered selections -->
+        <button class="btn key-btn" onclick="sendCommand('1')" style="height:28px;font-size:0.6rem;">1</button>
+        <button class="btn key-btn" onclick="sendCommand('2')" style="height:28px;font-size:0.6rem;">2</button>
+        <button class="btn key-btn" onclick="sendCommand('3')" style="height:28px;font-size:0.6rem;">3</button>
+        <!-- Screen capture + notify -->
+        <button class="btn key-btn" onclick="saveScreenshot()" style="height:28px;font-size:0.6rem;">📷 Save</button>
+        <button class="btn key-btn" onclick="copyScreen()" style="height:28px;font-size:0.6rem;">📋 Copy</button>
+        <button class="btn key-btn" onclick="textMe()" style="height:28px;font-size:0.6rem;">📲 Text</button>
+        <button class="btn key-btn" onclick="playMe()" style="height:28px;font-size:0.6rem;">🔊 Play</button>
     </div>
 
-    <!-- Row 1: Left half (Hamburger|Send|PgUp|PgDn) | Right half (Tabs) -->
+    <!-- Row 1: Hamburger | PgUp | PgDn | Tabs -->
     <div style="display:flex; align-items:center; margin-top:0.3rem; padding:0 0.2rem;">
-        <div style="width:50%; display:flex; gap:0.3rem; align-items:center; flex-shrink:0;">
+        <div style="width:30%; display:flex; gap:0.3rem; align-items:center; flex-shrink:0;">
             <button class="btn key-btn" onclick="toggleHamburger()" style="font-size:0.7rem; flex:1; height:32px; padding:0;">☰</button>
-            <button id="send-btn" class="btn bar-btn" onclick="manualSend()" title="Send" style="flex:1; height:32px; min-width:0;">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-            </button>
             <button class="btn key-btn" onclick="scrollTerminal('up')" style="font-size:0.5rem;flex:1;height:32px;padding:0;">PgUp</button>
             <button class="btn key-btn" onclick="scrollTerminal('down')" style="font-size:0.5rem;flex:1;height:32px;padding:0;">PgDn</button>
         </div>
-        <div id="tab-bar" style="width:50%; display:flex; gap:0.3rem; padding-left:0.3rem; overflow:hidden;">
-            <!-- Tabs rendered by JS -->
+        <div id="tab-bar" style="width:70%; display:flex; gap:0.3rem; padding-left:0.3rem; overflow:hidden;">
         </div>
     </div>
 
-    <!-- Row 2: ESC | ENTER -->
+    <!-- Row 2: ESC | MIC | ENTER -->
     <div class="key-row" style="gap:0.5rem;">
         <button class="btn big-btn btn-esc" onclick="sendKey('Escape')" style="flex:1;height:50px;">ESC</button>
+        <button id="mic-btn" class="btn big-btn btn-mic" onclick="toggleMic()">MIC</button>
         <button class="btn big-btn btn-enter" onclick="sendKey('Enter')" style="flex:1;height:50px;">ENTER</button>
     </div>
     <div style="height:60px;"></div>
 </div>
 
 <script>
-// --- Set terminal iframe URLs based on local vs remote access ---
+// --- Terminal iframe URLs ---
 (function() {
     const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
     document.querySelectorAll('.terminal-frame').forEach(f => {
@@ -62,88 +71,186 @@
 })();
 
 // --- State ---
-window.addEventListener('beforeunload', () => {
-    if (typeof audioStream !== 'undefined' && audioStream) {
-        audioStream.getTracks().forEach(t => t.stop());
-    }
-    if (typeof mainRecorder !== 'undefined' && mainRecorder && mainRecorder.state === 'recording') {
-        try { mainRecorder.stop(); } catch(e) {}
-    }
-    if (typeof clipRecorder !== 'undefined' && clipRecorder && clipRecorder.state === 'recording') {
-        try { clipRecorder.stop(); } catch(e) {}
-    }
-});
-
 let listening = false;
-
-// --- Core ---
 let audioStream = null;
-let mainRecorder = null;   // full recording for Groq transcription
-let mainChunks = [];
-let clipRecorder = null;   // short clip recorder for keyword detection
-let clipChunks = [];
-let prevClipBlob = null;   // previous clip as a finished blob
-let keywordScanInterval = null;  // periodic keyword scan timer
-let clipInterval = null;
-let _sessions = [];  // loaded for session switching
-let audioContext = null;
-let analyser = null;
-let volumeInterval = null;
-let processing = false;    // prevent overlapping keyword checks
-let wasTalking = false;    // true when volume was above threshold
-let clipHadSpeech = false; // true if current clip had any speech above threshold
-let silenceTimer = null;   // fires after sustained silence post-speech
-let silenceCommas = 0;     // counts seconds of silence (for keyword check)
-let tickTimer = null;      // global 1s ticker while mic is quiet
-let totalTicks = 0;        // total silent seconds in current quiet stretch
-let pendingCommas = 0;     // commas to prepend to next transcript chunk
-let transcriptParts = [];  // accumulates text + commas between keyword checks
+let recorder = null;
+let chunks = [];
+let _sessions = [];
+let ACTIVE_SESSION = '{{ session.id }}';
 
-const VOLUME_THRESHOLD = 18;
-const SILENCE_SECONDS = 2;  // seconds of silence before checking clip
+function setStatus(text) {
+    let toast = document.getElementById('spark-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'spark-toast';
+        toast.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:8px 18px;border-radius:8px;font-size:0.85rem;z-index:9999;opacity:0;transition:opacity 0.3s;pointer-events:none;max-width:90vw;text-align:center;';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = text;
+    toast.style.opacity = '1';
+    clearTimeout(toast._tid);
+    toast._tid = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+}
 
 function sparkLog(msg) {
     fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({msg})}).catch(()=>{});
 }
 
-function scrollTerminal(direction) {
-    fetch('/api/scroll', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({direction}),
-    });
+// --- Push-to-talk ---
+async function toggleMic() {
+    const btn = document.getElementById('mic-btn');
+    if (listening) {
+        // Stop recording → transcribe → send
+        listening = false;
+        btn.classList.remove('recording');
+        btn.textContent = 'MIC';
+        setStatus('Transcribing...');
+
+        if (recorder && recorder.state === 'recording') {
+            const blob = await new Promise(resolve => {
+                recorder.onstop = () => resolve(new Blob(chunks, {type: recorder.mimeType}));
+                recorder.stop();
+            });
+
+            const ext = blob.type.includes('webm') ? 'webm' : 'm4a';
+            const formData = new FormData();
+            formData.append('audio', blob, `recording.${ext}`);
+
+            try {
+                const res = await fetch('/api/transcribe', {method: 'POST', body: formData});
+                const data = await res.json();
+                if (data.text && data.text.trim()) {
+                    const text = data.text.trim();
+                    setStatus('Sent: ' + text);
+                    sparkLog('SENT: ' + text);
+                    await fetch('/api/voice-text', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({text}),
+                    });
+                } else {
+                    setStatus('No speech detected');
+                }
+            } catch(e) {
+                setStatus('Transcribe failed');
+                sparkLog('TRANSCRIBE_ERR: ' + e.message);
+            }
+        }
+
+        if (audioStream) {
+            audioStream.getTracks().forEach(t => t.stop());
+            audioStream = null;
+        }
+        recorder = null;
+        chunks = [];
+    } else {
+        // Start recording
+        try {
+            audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
+            chunks = [];
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+            recorder = new MediaRecorder(audioStream, {mimeType});
+            recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+            recorder.start();
+            listening = true;
+            btn.classList.add('recording');
+            btn.textContent = 'REC';
+            setStatus('Recording...');
+            sparkLog('MIC_ON');
+        } catch(e) {
+            setStatus('Mic access denied');
+            sparkLog('MIC_DENIED: ' + e.message);
+        }
+    }
 }
 
+// Bluetooth clicker sends volumeup key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'AudioVolumeUp' || e.key === 'VolumeUp') {
+        e.preventDefault();
+        toggleMic();
+    }
+});
+
+// --- Key/nav helpers ---
 async function sendKey(key) {
     try {
-        const res = await fetch('/api/key', {
+        await fetch('/api/key', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({key: key}),
+            body: JSON.stringify({key}),
         });
-        if (!res.ok) sparkLog('KEY_ERR: ' + res.status);
-    } catch (e) {
-        sparkLog('KEY_FETCH_ERR: ' + e.message);
+    } catch(e) {
         setTimeout(() => {
-            fetch('/api/key', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({key: key}),
-            }).catch(() => {});
+            fetch('/api/key', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}).catch(()=>{});
         }, 200);
     }
 }
 
-function sendSlashNew() {
-    fetch('/api/voice-text', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({text: '/new'}),
-    });
+function scrollTerminal(direction) {
+    fetch('/api/scroll', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({direction})});
 }
 
-function setStatus(text) {
-    document.getElementById('status-bar').textContent = text;
+function sendCommand(text) {
+    fetch('/api/voice-text', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})});
+}
+
+function saveScreenshot() {
+    setStatus('Saving...');
+    fetch('/api/screenshot/save', {method:'POST'})
+        .then(r => r.json().then(d => {
+            if (r.ok) setStatus('Screenshot saved');
+            else setStatus('Save failed: ' + (d.error || 'empty screen'));
+        }))
+        .catch(() => setStatus('Save failed: server error'));
+}
+
+function textMe() {
+    setStatus('Sending text...');
+    fetch('/api/text-me', {method:'POST'})
+        .then(r => r.json().then(d => {
+            if (r.ok) setStatus('Text queued — SMS on its way');
+            else setStatus('Text failed: ' + (d.error || 'unknown'));
+        }))
+        .catch(() => setStatus('Text failed: server error'));
+}
+
+function playMe() {
+    setStatus('Playing...');
+    fetch('/api/play-me', {method:'POST'})
+        .then(r => r.json().then(d => {
+            if (r.ok) setStatus('Play queued — audio on its way');
+            else setStatus('Play failed: ' + (d.error || 'unknown'));
+        }))
+        .catch(() => setStatus('Play failed: server error'));
+}
+
+function copyScreen() {
+    setStatus('Copying...');
+    fetch('/api/screenshot', {method:'POST'})
+        .then(r => r.json())
+        .then(d => {
+            if (!d.text) { setStatus('Nothing to copy'); return; }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(d.text)
+                    .then(() => setStatus('Copied to clipboard'))
+                    .catch(() => fallbackCopy(d.text));
+            } else {
+                fallbackCopy(d.text);
+            }
+        })
+        .catch(() => setStatus('Copy failed: server error'));
+}
+
+function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px;';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); setStatus('Copied to clipboard'); }
+    catch(e) { setStatus('Copy failed — try from localhost'); }
+    document.body.removeChild(ta);
 }
 
 function toggleHamburger() {
@@ -151,396 +258,47 @@ function toggleHamburger() {
     panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
 }
 
-// --- Mic toggle ---
-async function toggleListening() {
-    if (listening) {
-        listening = false;
-        stopListening();
-        document.getElementById('mic-btn').classList.remove('listening', 'recording');
-        setStatus('Mic off');
-        return;
-    }
-    await startListening();
+// --- Session themes ---
+function applyTheme(id) {
+    document.body.className = document.body.className.replace(/theme-\w+/g, '').trim();
+    document.body.classList.add('theme-' + id);
 }
 
-async function startListening() {
-    try {
-        audioStream = await navigator.mediaDevices.getUserMedia({audio: true});
-        startMainRecorder();
-        startVolumeMonitor();
-        startKeywordScanner();
-        listening = true;
-        document.getElementById('mic-btn').classList.add('listening');
-        setStatus('Recording... say "go ahead" to send');
-        sparkLog('MIC_ON');
-    } catch (e) {
-        setStatus('Mic access denied');
-        sparkLog('MIC_DENIED: ' + e.message);
-    }
-}
-
-function stopListening() {
-    stopVolumeMonitor();
-    stopKeywordScanner();
-    stopClipCycle();
-    if (mainRecorder && mainRecorder.state === 'recording') {
-        try { mainRecorder.stop(); } catch(e) {}
-    }
-    mainRecorder = null;
-    mainChunks = [];
-    clipChunks = [];
-    prevClipBlob = null;
-    if (audioStream) {
-        audioStream.getTracks().forEach(t => t.stop());
-        audioStream = null;
-    }
-    sparkLog('MIC_OFF');
-}
-
-// --- Main recorder (continuous, full audio for transcription) ---
-function startMainRecorder() {
-    if (!audioStream) return;
-    mainChunks = [];
-    clipChunks = [];
-    prevClipBlob = null;
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
-    mainRecorder = new MediaRecorder(audioStream, {mimeType});
-    mainRecorder.ondataavailable = (e) => { if (e.data.size > 0) mainChunks.push(e.data); };
-    mainRecorder.start();
-    sparkLog('MAIN_REC_START');
-}
-
-// --- Clip recorder ---
-function stopClipCycle() {
-    if (clipRecorder && clipRecorder.state === 'recording') {
-        try { clipRecorder.stop(); } catch(e) {}
-    }
-    clipRecorder = null;
-    clipChunks = [];
-}
-
-function startNewClip() {
-    if (clipRecorder && clipRecorder.state === 'recording') {
-        try { clipRecorder.stop(); } catch(e) {}
-    }
-    if (!audioStream) return;
-    clipChunks = [];
-    clipHadSpeech = false;
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
-    clipRecorder = new MediaRecorder(audioStream, {mimeType});
-    clipRecorder.ondataavailable = (e) => { if (e.data.size > 0) clipChunks.push(e.data); };
-    clipRecorder.start();
-    sparkLog('CLIP_REC_START');
-}
-
-// --- Volume monitoring ---
-async function startVolumeMonitor() {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioContext.state === 'suspended') await audioContext.resume();
-    analyser = audioContext.createAnalyser();
-    analyser.fftSize = 512;
-    const source = audioContext.createMediaStreamSource(audioStream);
-    source.connect(analyser);
-    const data = new Uint8Array(analyser.frequencyBinCount);
-
-    volumeInterval = setInterval(() => {
-        if (processing) return;
-        analyser.getByteFrequencyData(data);
-        const avg = data.reduce((a, b) => a + b, 0) / data.length;
-
-        if (avg > VOLUME_THRESHOLD) {
-            document.getElementById('mic-btn').classList.add('recording');
-            setStatus('🎙 ' + Math.round(avg) + ' dB');
-            wasTalking = true;
-            clipHadSpeech = true;
-            if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; silenceCommas = 0; }
-            if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
-            totalTicks = 0;
-        } else {
-            document.getElementById('mic-btn').classList.remove('recording');
-            if (listening) document.getElementById('mic-btn').classList.add('listening');
-            if (!tickTimer) {
-                totalTicks = 0;
-                tickTimer = setInterval(() => {
-                    totalTicks++;
-                    pendingCommas++;
-                    setStatus(', '.repeat(totalTicks).trim() || 'Waiting...');
-                }, 1000);
-            }
-            if (wasTalking && !silenceTimer) {
-                silenceCommas = 0;
-                silenceTimer = setTimeout(() => {
-                    silenceTimer = null;
-                    silenceCommas = totalTicks;
-                    wasTalking = false;
-                    checkClipForKeyword();
-                }, SILENCE_SECONDS * 1000);
-            }
-        }
-    }, 100);
-}
-
-function stopVolumeMonitor() {
-    if (volumeInterval) { clearInterval(volumeInterval); volumeInterval = null; }
-    if (audioContext) { audioContext.close(); audioContext = null; }
-    analyser = null;
-}
-
-function startKeywordScanner() {
-    startNewClip();
-    wasTalking = false;
-    silenceTimer = null;
-    transcriptParts = [];
-    pendingCommas = 0;
-}
-
-function stopKeywordScanner() {
-    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
-    if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
-    wasTalking = false;
-    silenceCommas = 0;
-    totalTicks = 0;
-    transcriptParts = [];
-    pendingCommas = 0;
-}
-
-function score(a, b) {
-    if (a === b) return 1;
-    if (Math.abs(a.length - b.length) <= 2 && (a.includes(b) || b.includes(a))) return 0.9;
-    let m = 0;
-    for (let i = 0; i < Math.min(a.length, b.length); i++) { if (a[i] === b[i]) m++; }
-    return m / Math.max(a.length, b.length);
-}
-
-function getCommandTargets() {
-    return [
-        {names: ['press enter', 'send enter', 'press nter', 'press inter'], act: () => sendKey('Enter'), label: 'enter'},
-        {names: ['press escape', 'send escape', 'press scape'], act: () => sendKey('Escape'), label: 'escape'},
-        {names: ['press clear', 'clear all'], act: () => {
-            transcriptParts = []; pendingCommas = 0;
-            setStatus('Transcript cleared.');
-        }, label: 'clear transcript'},
-        {names: ['press clear', 'clear recording'], act: () => {
-            if (mainRecorder && mainRecorder.state === 'recording') try { mainRecorder.stop(); } catch(e) {}
-            mainChunks = [];
-            if (listening) startMainRecorder();
-            setStatus('Recording cleared.');
-        }, label: 'clear'},
-        ..._sessions.map(s => ({
-            names: [s.name.toLowerCase(), s.id],
-            act: () => switchSession(s.id),
-            label: 'session: ' + s.name,
-        })),
-    ];
-}
-
-async function checkClipForKeyword() {
-    if (processing) return;
-    processing = true;
-
-    if (!clipHadSpeech) {
-        processing = false;
-        if (listening) startNewClip();
-        return;
-    }
-
-    if (clipRecorder && clipRecorder.state === 'recording') {
-        await new Promise(resolve => {
-            clipRecorder.onstop = resolve;
-            clipRecorder.stop();
-        });
-    }
-
-    const mimeType = clipRecorder ? clipRecorder.mimeType : 'audio/webm';
-    const ext = mimeType.includes('webm') ? 'webm' : 'm4a';
-    const blob = new Blob(clipChunks, {type: mimeType});
-
-    const formData = new FormData();
-    formData.append('audio', blob, `clip.${ext}`);
-
-    try {
-        const res = await fetch('/api/transcribe', {method: 'POST', body: formData});
-        const data = await res.json();
-        if (data.text) {
-            const heard = data.text.trim().toLowerCase();
-            const cleaned = heard.replace(/[^a-z ]/g, '').trim().replace(/\s*thank you\s*$/g, '').trim();
-
-            // Discard Whisper hallucinations (phantom phrases on near-silent clips)
-            const PHANTOMS = ['thank you', 'thanks', 'thanks for watching', 'you', 'bye',
-                'the end', 'okay', 'so', 'hmm', 'uh', 'um', 'ah', 'subscribe',
-                'like and subscribe', 'thank you for watching', ''];
-            if (PHANTOMS.includes(cleaned)) {
-                sparkLog('PHANTOM_DISCARD: ' + heard);
-                processing = false;
-                if (listening) startNewClip();
-                return;
-            }
-
-            const commaPrefix = pendingCommas > 0 ? ', '.repeat(pendingCommas) : '';
-            pendingCommas = 0;
-            transcriptParts.push(commaPrefix + heard);
-            const words = cleaned.split(/\s+/);
-
-            const goAheadMatch = cleaned.match(/\bgo\s+ahead\b/);
-            if (goAheadMatch) {
-                const idx = cleaned.indexOf(goAheadMatch[0]);
-                const before = cleaned.substring(0, idx).trim();
-                if (before) transcriptParts[transcriptParts.length - 1] = before;
-                
-                setStatus('Sending transcript...');
-                await sendFullRecording();
-                transcriptParts = [];
-                pendingCommas = 0;
-                processing = false;
-                if (listening) startNewClip();
-                return;
-            }
-
-            if (words.length <= 4 && /^(press|send|go)\b/.test(cleaned)) {
-                const targets = getCommandTargets();
-                let bestScore = 0, bestTarget = null;
-                for (const t of targets) {
-                    for (const n of t.names) {
-                        const s = score(cleaned, n);
-                        if (s > bestScore) { bestScore = s; bestTarget = t; }
-                    }
-                }
-
-                if (bestTarget && bestScore >= 0.5) {
-                    setStatus(bestTarget.label);
-                    bestTarget.act();
-                    transcriptParts = [];
-                    pendingCommas = 0;
-                    processing = false;
-                    if (listening) startNewClip();
-                    return;
-                }
-            }
-        }
-    } catch (e) { console.error(e); }
-
-    processing = false;
-    if (listening) startNewClip();
-}
-
-async function manualSend() {
-    // Cancel pending timers
-    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
-    if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
-    wasTalking = false;
-    processing = true;
-    setStatus('Sending transcript...');
-
-    // Stop clip recorder and transcribe any remaining audio
-    if (clipRecorder && clipRecorder.state === 'recording') {
-        await new Promise(resolve => {
-            clipRecorder.onstop = resolve;
-            clipRecorder.stop();
-        });
-        if (clipChunks.length > 0) {
-            const mimeType = clipRecorder.mimeType || 'audio/webm';
-            const ext = mimeType.includes('webm') ? 'webm' : 'm4a';
-            const blob = new Blob(clipChunks, {type: mimeType});
-            try {
-                const formData = new FormData();
-                formData.append('audio', blob, `clip.${ext}`);
-                const res = await fetch('/api/transcribe', {method: 'POST', body: formData});
-                const data = await res.json();
-                if (data.text) {
-                    const heard = data.text.trim().toLowerCase();
-                    const commaPrefix = pendingCommas > 0 ? ', '.repeat(pendingCommas) : '';
-                    transcriptParts.push(commaPrefix + heard);
-                }
-            } catch (e) { console.error('Final clip transcribe failed:', e); }
-        }
-    }
-
-    await sendFullRecording();
-    transcriptParts = [];
-    pendingCommas = 0;
-    totalTicks = 0;
-    processing = false;
-    if (listening) startNewClip();
-}
-
-async function sendFullRecording() {
-    let text = transcriptParts.join(' ').trim();
-    text = text.replace(/[,.\s]*go ahead[,.\s?]*$/i, '').trim();
-    text = text.replace(/[,\s]+$/, '').trim();
-
-    if (text) {
-        setStatus('Sent: ' + text);
-        sendText(text);
-    } else {
-        setStatus('Ready...');
-    }
-
-    mainChunks = [];
-    if (mainRecorder && mainRecorder.state === 'recording') {
-        try { mainRecorder.stop(); } catch(e) {}
-    }
-    if (listening) startMainRecorder();
-}
-
-async function sendText(text) {
-    try {
-        await fetch('/api/voice-text', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({text: text}),
-        });
-    } catch (e) { console.error(e); }
-}
-
+// --- Session/tab management ---
 function switchSession(id) {
     fetch('/api/session', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id}),
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}),
     }).then(() => {
-        // All 3 iframes preloaded — just toggle visibility
-        document.querySelectorAll('.terminal-frame').forEach(f => {
-            f.style.display = f.id === 'term-' + id ? '' : 'none';
+        document.querySelectorAll('.terminal-wrap').forEach(w => {
+            w.style.display = w.id === 'wrap-' + id ? '' : 'none';
         });
         ACTIVE_SESSION = id;
+        applyTheme(id);
         renderTabs();
     });
 }
-
-let ACTIVE_SESSION = '{{ session.id }}';
 
 function createTabButton(s) {
     const btn = document.createElement('button');
     btn.className = 'btn tab-btn';
     if (s.id === ACTIVE_SESSION) btn.classList.add('active');
-
     const nameDiv = document.createElement('div');
     nameDiv.innerText = s.name || s.id;
     btn.appendChild(nameDiv);
-
-    if (!s.alive && s.id !== ACTIVE_SESSION) {
-        btn.style.opacity = '0.5';
-    }
-
+    if (!s.alive && s.id !== ACTIVE_SESSION) btn.style.opacity = '0.5';
     btn.onclick = () => switchSession(s.id);
-
     btn.oncontextmenu = (e) => {
         e.preventDefault();
-        const name = prompt(`Rename tab:`, s.name);
+        const name = prompt('Rename tab:', s.name);
         if (name && name.trim()) renameSession(s.id, name.trim());
     };
-
     return btn;
 }
 
 async function renameSession(id, name) {
     if (!name) return;
     try {
-        await fetch('/api/session/rename', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({id, name}),
-        });
+        await fetch('/api/session/rename', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id,name})});
         refreshSessions();
     } catch(e) {}
 }
@@ -560,13 +318,14 @@ async function refreshSessions() {
     } catch(e) {}
 }
 
-window.addEventListener('load', () => {
-    refreshSessions();
-    if (!listening) toggleListening();
+// --- Cleanup ---
+window.addEventListener('beforeunload', () => {
+    if (audioStream) audioStream.getTracks().forEach(t => t.stop());
+    if (recorder && recorder.state === 'recording') try { recorder.stop(); } catch(e) {}
 });
 
+window.addEventListener('load', () => { applyTheme(ACTIVE_SESSION); refreshSessions(); });
 setInterval(refreshSessions, 10000);
-
 </script>
 </body>
 </html>

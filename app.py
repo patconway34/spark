@@ -100,11 +100,20 @@ VOICE_COMMANDS = {
 }
 
 
-def send_to_claude(text):
-    """Send keystrokes to the active tmux session."""
+def send_to_claude(text, session_id=None):
+    """Send keystrokes to a tmux session. Uses explicit session_id if given."""
     global _last_text
     _last_text = text
-    tmux = get_session()["tmux"]
+    if session_id:
+        tmux = None
+        for s in SESSIONS:
+            if s["id"] == session_id:
+                tmux = s["tmux"]
+                break
+        if not tmux:
+            tmux = get_session()["tmux"]
+    else:
+        tmux = get_session()["tmux"]
     cmd = text.strip().lower().rstrip(".")
     key = VOICE_COMMANDS.get(cmd)
     if key:
@@ -259,8 +268,18 @@ def rename_session():
 
 ALLOWED_KEYS = {
     "Enter", "Escape", "Tab", "BTab", "Up", "Down", "Left", "Right",
-    "Space", "PageUp", "PageDown", "C-c", "C-z", "C-d",
+    "Space", "PageUp", "PageDown", "C-c", "C-z", "C-d", "BSpace",
 }
+
+
+def _resolve_session(data=None):
+    """Resolve tmux session name from request data or fall back to active."""
+    sid = (data or {}).get("session", "")
+    if sid:
+        for s in SESSIONS:
+            if s["id"] == sid:
+                return s["tmux"]
+    return get_session()["tmux"]
 
 
 @app.route("/api/key", methods=["POST"])
@@ -269,9 +288,26 @@ def key():
     k = (data.get("key") or "").strip()
     if k not in ALLOWED_KEYS:
         return jsonify({"error": "Key not allowed"}), 400
+    tmux = _resolve_session(data)
+    result = subprocess.run(
+        _tmux_cmd("send-keys", "-t", tmux, k),
+        capture_output=True, timeout=15,
+    )
+    if result.returncode != 0:
+        return jsonify({"error": f"tmux failed (rc={result.returncode})"}), 500
+    return jsonify({"ok": True, "session": tmux})
+
+
+@app.route("/api/type", methods=["POST"])
+def type_char():
+    """Send raw characters to tmux without Enter — for keyboard typing."""
+    data = request.get_json()
+    text = data.get("text", "")
+    if not text:
+        return jsonify({"error": "No text"}), 400
     tmux = get_session()["tmux"]
     subprocess.run(
-        _tmux_cmd("send-keys", "-t", tmux, k),
+        _tmux_cmd("send-keys", "-t", tmux, "-l", "--", text),
         capture_output=True, timeout=15,
     )
     return jsonify({"ok": True})
@@ -281,7 +317,7 @@ def key():
 def scroll():
     data = request.get_json()
     direction = data.get("direction", "up")
-    tmux = get_session()["tmux"]
+    tmux = _resolve_session(data)
     if direction == "up":
         subprocess.run(_tmux_cmd("copy-mode", "-t", tmux), capture_output=True, timeout=15)
         subprocess.run(_tmux_cmd("send-keys", "-t", tmux, "-X", "page-up"), capture_output=True, timeout=15)
@@ -423,7 +459,25 @@ def voice_text():
     text = (data.get("text") or "").strip()
     if not text:
         return jsonify({"error": "No text"}), 400
-    send_to_claude(text)
+    send_to_claude(text, session_id=data.get("session"))
+    return jsonify({"ok": True, "input": text})
+
+
+@app.route("/api/paste-text", methods=["POST"])
+def paste_text():
+    """Paste text into tmux without hitting Enter — lets user accumulate input."""
+    data = request.get_json()
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "No text"}), 400
+    global _last_text
+    _last_text = text
+    tmux = _resolve_session(data)
+    subprocess.run(
+        _tmux_cmd("send-keys", "-t", tmux, "-l", "--", text),
+        capture_output=True, timeout=15,
+    )
+    logging.info(f"PASTE text='{text[:80]}' session={tmux} (no enter)")
     return jsonify({"ok": True, "input": text})
 
 

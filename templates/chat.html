@@ -10,7 +10,7 @@
 
 {% for s in sessions %}
 <div class="terminal-wrap" id="wrap-{{ s.id }}" style="{% if s.id != session.id %}display:none;{% endif %}">
-<iframe id="term-{{ s.id }}" class="terminal-frame" data-local="{{ s.local_url }}" data-remote="{{ s.remote_url }}"></iframe>
+<iframe id="term-{{ s.id }}" class="terminal-frame" data-local="{{ s.local_url }}" data-remote="{{ s.remote_url }}" style="pointer-events:none;"></iframe>
 </div>
 {% endfor %}
 
@@ -52,6 +52,14 @@
         </div>
     </div>
 
+    <!-- Type bar -->
+    <div style="display:flex; gap:0.3rem; padding:0.2rem 0.2rem 0;">
+        <input id="type-bar" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+            placeholder="Type here..."
+            style="flex:1; height:36px; border:1px solid var(--border-strong); border-radius:6px; padding:0 8px; font-size:0.85rem; font-family:var(--font-mono); background:var(--surface); color:var(--text);">
+        <button class="btn key-btn" onclick="sendTyped()" style="height:36px; font-size:0.7rem; padding:0 10px; font-weight:600;">SEND</button>
+    </div>
+
     <!-- Row 2: ESC | MIC | ENTER -->
     <div class="key-row" style="gap:0.5rem;">
         <button class="btn big-btn btn-esc" onclick="sendKey('Escape')" style="flex:1;height:50px;">ESC</button>
@@ -69,6 +77,16 @@
         f.src = isLocal ? f.dataset.local : f.dataset.remote;
     });
 })();
+
+// --- Prevent iframe from stealing keyboard focus ---
+// All input goes through Spark UI (mic, type-bar, buttons), never directly into terminal.
+// Without this, clicking the terminal iframe steals focus and hotkeys stop working.
+document.addEventListener('focusin', (e) => {
+    if (e.target.tagName === 'IFRAME') {
+        e.target.blur();
+        document.body.focus();
+    }
+});
 
 // --- State ---
 let listening = false;
@@ -121,13 +139,10 @@ async function toggleMic() {
                 const data = await res.json();
                 if (data.text && data.text.trim()) {
                     const text = data.text.trim();
-                    setStatus('Sent: ' + text);
-                    sparkLog('SENT: ' + text);
-                    await fetch('/api/voice-text', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({text}),
-                    });
+                    // Paste directly into terminal (no enter) — user sends when ready
+                    fetch('/api/paste-text', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text, session: ACTIVE_SESSION})});
+                    setStatus('Pasted — mic again or hit ENTER');
+                    sparkLog('TRANSCRIBED: ' + text);
                 } else {
                     setStatus('No speech detected');
                 }
@@ -164,35 +179,103 @@ async function toggleMic() {
     }
 }
 
-// Bluetooth clicker sends volumeup key
+// --- Type bar ---
+function sendTyped() {
+    const input = document.getElementById('type-bar');
+    const text = input.value.trim();
+    if (!text) return;
+    sendCommand(text);
+    input.value = '';
+    setStatus('Sent: ' + text);
+}
+document.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('type-bar');
+    if (input) {
+        input.addEventListener('keydown', (e) => {
+            // Ctrl+M toggles mic (even while typing) — must check before Enter
+            // because Ctrl+M = ASCII 13 = carriage return in some browsers
+            if (e.ctrlKey && e.code === 'KeyM') { e.preventDefault(); toggleMic(); return; }
+            if (e.key === 'Enter' && !e.ctrlKey) { e.preventDefault(); sendTyped(); }
+            e.stopPropagation(); // don't let keyboard router intercept typing
+        });
+    }
+});
+
+// --- Hotkey: toggle mic ---
+// Works with: Ctrl+M (desktop), F9 (AHK remap), double-tap Enter/PageDown (clicker)
+// NOTE: Volume keys (AudioVolumeUp) do NOT reach JS on Android — OS intercepts them.
+let _lastMicKey = 0;
+const MIC_DOUBLE_TAP_MS = 400;
+
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'AudioVolumeUp' || e.key === 'VolumeUp') {
+    // Skip if typing in the type-bar
+    if (e.target.id === 'type-bar') return;
+
+    // Ctrl+M — desktop keyboard (use e.code because Ctrl+M = ASCII 13 = Enter in some browsers)
+    if (e.ctrlKey && e.code === 'KeyM') {
         e.preventDefault();
         toggleMic();
+        return;
     }
+
+    // F9 — AutoHotkey remap target
+    if (e.key === 'F9') {
+        e.preventDefault();
+        toggleMic();
+        return;
+    }
+
+    // Double-tap detection for clicker keys (PageDown, PageUp)
+    // Single tap still works normally — only double-tap triggers mic
+    if (e.key === 'PageDown' || e.key === 'PageUp') {
+        const now = Date.now();
+        if (now - _lastMicKey < MIC_DOUBLE_TAP_MS) {
+            e.preventDefault();
+            toggleMic();
+            _lastMicKey = 0;
+        } else {
+            _lastMicKey = now;
+        }
+        return;
+    }
+
+    // Forward common keys to tmux (since iframe is cross-origin)
+    if (e.key === 'Enter' && !e.ctrlKey) { e.preventDefault(); sendKey('Enter'); return; }
+    if (e.key === 'Escape') { e.preventDefault(); sendKey('Escape'); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); sendKey('Up'); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); sendKey('Down'); return; }
+    if (e.key === 'Tab') { e.preventDefault(); sendKey('Tab'); return; }
+    if (e.key === 'Backspace') { e.preventDefault(); sendKey('BSpace'); return; }
 });
 
 // --- Key/nav helpers ---
 async function sendKey(key) {
     try {
-        await fetch('/api/key', {
+        const res = await fetch('/api/key', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({key}),
+            body: JSON.stringify({key, session: ACTIVE_SESSION}),
         });
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            setStatus('Key failed: ' + (d.error || res.status));
+        }
     } catch(e) {
-        setTimeout(() => {
-            fetch('/api/key', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}).catch(()=>{});
-        }, 200);
+        setStatus('Key failed — retrying...');
+        try {
+            await fetch('/api/key', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key, session: ACTIVE_SESSION})});
+        } catch(e2) {
+            setStatus('Key failed — check connection');
+        }
     }
 }
 
 function scrollTerminal(direction) {
-    fetch('/api/scroll', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({direction})});
+    fetch('/api/scroll', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({direction, session: ACTIVE_SESSION})});
 }
 
 function sendCommand(text) {
-    fetch('/api/voice-text', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})});
+    fetch('/api/voice-text', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text, session: ACTIVE_SESSION})});
 }
 
 function saveScreenshot() {
@@ -265,17 +348,30 @@ function applyTheme(id) {
 }
 
 // --- Session/tab management ---
-function switchSession(id) {
-    fetch('/api/session', {
-        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}),
-    }).then(() => {
+let _switching = false;
+async function switchSession(id) {
+    if (_switching || id === ACTIVE_SESSION) return;
+    _switching = true;
+    try {
+        const res = await fetch('/api/session', {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}),
+        });
+        if (!res.ok) {
+            setStatus('Switch failed');
+            return;
+        }
+        // Only update after backend confirms
+        ACTIVE_SESSION = id;
         document.querySelectorAll('.terminal-wrap').forEach(w => {
             w.style.display = w.id === 'wrap-' + id ? '' : 'none';
         });
-        ACTIVE_SESSION = id;
         applyTheme(id);
         renderTabs();
-    });
+    } catch(e) {
+        setStatus('Switch failed — check connection');
+    } finally {
+        _switching = false;
+    }
 }
 
 function createTabButton(s) {
@@ -317,6 +413,17 @@ async function refreshSessions() {
         renderTabs();
     } catch(e) {}
 }
+
+// --- Auto-reconnect terminal iframes ---
+// When page becomes visible again (phone unlocked, tab switched back),
+// reload all terminal iframes so you never see "hit enter to reconnect"
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        document.querySelectorAll('.terminal-frame').forEach(f => {
+            try { f.src = f.src; } catch(e) {}
+        });
+    }
+});
 
 // --- Cleanup ---
 window.addEventListener('beforeunload', () => {

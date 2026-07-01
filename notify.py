@@ -23,6 +23,7 @@ def summarize_for_text(text):
             "Summarize this Claude Code terminal output in 2-3 short sentences. "
             "What happened and any key results. Keep it under 300 characters for SMS."
         ),
+        model="claude-haiku-4-5-20251001",
     )
 
 
@@ -33,10 +34,11 @@ def summarize_for_voice(text):
         system=(
             "You are summarizing a Claude Code terminal session for the developer. "
             "Deliver the summary as a short spoken piece in Alan Watts' voice. "
-            "Keep it under 400 words since this becomes audio. "
+            "Keep it under 100 words since this becomes audio. "
             "Be warm, insightful, and conversational.\n\n"
             f"{personality}"
         ),
+        model="claude-haiku-4-5-20251001",
     )
 
 
@@ -46,13 +48,23 @@ def main():
     text = input_file.read_text(encoding="utf-8")
 
     if mode == "text":
-        summary = summarize_for_text(text)
         from buzz import send
+        try:
+            summary = summarize_for_text(text)
+        except Exception as e:
+            # AI summary failed — send raw last 280 chars instead of nothing
+            summary = text.strip()[-280:]
+            print(f"SUMMARIZE_FAILED ({e}), sending raw")
         send(summary, to="patrick")
         print(summary)
 
     elif mode == "play":
-        summary = summarize_for_voice(text)
+        try:
+            summary = summarize_for_voice(text)
+        except Exception as e:
+            # AI summary failed — use raw last 800 chars as spoken text
+            summary = "Here's what happened in the terminal. " + text.strip()[-800:]
+            print(f"SUMMARIZE_FAILED ({e}), using raw")
         ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         story_path = Path(f"C:/dev/yarn/stories/{ts}_spark.txt")
         story_path.parent.mkdir(parents=True, exist_ok=True)

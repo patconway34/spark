@@ -49,14 +49,17 @@ body {
     flex: 1;
     position: relative;
     overflow: hidden;
+    width: 100vw;
+    min-width: 100vw;
 }
 
 .terminal-frame {
-    width: 100%;
+    width: 100vw !important;
+    min-width: 100vw !important;
     height: calc(100% + 25px);
     border: none;
     background: var(--theme-bg, #f0f0f0);
-    /* pointer-events enabled — tap to type directly in terminal */
+    pointer-events: none;
 }
 
 

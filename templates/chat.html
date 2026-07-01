@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
     <title>Spark</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.5">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.7">
 </head>
-<body>
+<body tabindex="-1">
 
 {% for s in sessions %}
 <div class="terminal-wrap" id="wrap-{{ s.id }}" style="{% if s.id != session.id %}display:none;{% endif %}">
-<iframe id="term-{{ s.id }}" class="terminal-frame" data-local="{{ s.local_url }}" data-remote="{{ s.remote_url }}" style="pointer-events:none;"></iframe>
+<iframe id="term-{{ s.id }}" class="terminal-frame" data-local="{{ s.local_url }}" data-remote="{{ s.remote_url }}"></iframe>
 </div>
 {% endfor %}
 
@@ -28,6 +28,7 @@
         <button class="btn key-btn" onclick="sendKey('Up')" style="height:28px;font-size:0.6rem;">▲</button>
         <button class="btn key-btn" onclick="sendKey('Down')" style="height:28px;font-size:0.6rem;">▼</button>
         <!-- Control -->
+        <button class="btn key-btn" onclick="sendKey('C-u')" style="height:28px;font-size:0.6rem;">Clear</button>
         <button class="btn key-btn" onclick="sendKey('C-c')" style="height:28px;font-size:0.6rem;">^C</button>
         <button class="btn key-btn" onclick="sendKey('C-z')" style="height:28px;font-size:0.6rem;">^Z</button>
         <!-- Numbered selections -->
@@ -58,6 +59,7 @@
             placeholder="Type here..."
             style="flex:1; height:36px; border:1px solid var(--border-strong); border-radius:6px; padding:0 8px; font-size:0.85rem; font-family:var(--font-mono); background:var(--surface); color:var(--text);">
         <button class="btn key-btn" onclick="sendTyped()" style="height:36px; font-size:0.7rem; padding:0 10px; font-weight:600;">SEND</button>
+        <button class="btn key-btn" onclick="reloadTerminal()" style="height:36px; font-size:0.6rem; padding:0 6px;" title="Reload terminal">&#x21bb;</button>
     </div>
 
     <!-- Row 2: ESC | MIC | ENTER -->
@@ -77,16 +79,6 @@
         f.src = isLocal ? f.dataset.local : f.dataset.remote;
     });
 })();
-
-// --- Prevent iframe from stealing keyboard focus ---
-// All input goes through Spark UI (mic, type-bar, buttons), never directly into terminal.
-// Without this, clicking the terminal iframe steals focus and hotkeys stop working.
-document.addEventListener('focusin', (e) => {
-    if (e.target.tagName === 'IFRAME') {
-        e.target.blur();
-        document.body.focus();
-    }
-});
 
 // --- State ---
 let listening = false;
@@ -208,42 +200,31 @@ let _lastMicKey = 0;
 const MIC_DOUBLE_TAP_MS = 400;
 
 document.addEventListener('keydown', (e) => {
-    // Skip if typing in the type-bar
+    // Skip if typing in the type-bar — all hotkeys disabled while typing
     if (e.target.id === 'type-bar') return;
 
-    // Ctrl+M — desktop keyboard (use e.code because Ctrl+M = ASCII 13 = Enter in some browsers)
-    if (e.ctrlKey && e.code === 'KeyM') {
-        e.preventDefault();
-        toggleMic();
-        return;
-    }
+    // --- Mic toggle ---
+    if (e.ctrlKey && e.code === 'KeyM') { e.preventDefault(); toggleMic(); return; }
+    if (e.key === 'F9') { e.preventDefault(); toggleMic(); return; }  // 8BitDo A
 
-    // F9 — AutoHotkey remap target
-    if (e.key === 'F9') {
-        e.preventDefault();
-        toggleMic();
-        return;
-    }
+    // --- Send ---
+    if (e.key === 'Enter' && !e.ctrlKey) { e.preventDefault(); sendKey('Enter'); return; }  // 8BitDo B
 
-    // Double-tap detection for clicker keys (PageDown, PageUp)
-    // Single tap still works normally — only double-tap triggers mic
-    if (e.key === 'PageDown' || e.key === 'PageUp') {
-        const now = Date.now();
-        if (now - _lastMicKey < MIC_DOUBLE_TAP_MS) {
-            e.preventDefault();
-            toggleMic();
-            _lastMicKey = 0;
-        } else {
-            _lastMicKey = now;
-        }
-        return;
-    }
+    // --- Scroll terminal ---
+    if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); scrollTerminal('up'); return; }   // 8BitDo D-pad Up
+    if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); scrollTerminal('down'); return; }  // 8BitDo D-pad Down
 
-    // Forward common keys to tmux (since iframe is cross-origin)
-    if (e.key === 'Enter' && !e.ctrlKey) { e.preventDefault(); sendKey('Enter'); return; }
-    if (e.key === 'Escape') { e.preventDefault(); sendKey('Escape'); return; }
-    if (e.key === 'ArrowUp') { e.preventDefault(); sendKey('Up'); return; }
-    if (e.key === 'ArrowDown') { e.preventDefault(); sendKey('Down'); return; }
+    // --- Tab switching ---
+    if (e.key === 'ArrowLeft') { e.preventDefault(); switchSessionByOffset(-1); return; }   // 8BitDo D-pad Left
+    if (e.key === 'ArrowRight') { e.preventDefault(); switchSessionByOffset(1); return; }   // 8BitDo D-pad Right
+
+    // --- Actions ---
+    if (e.key === 'F10') { e.preventDefault(); playMe(); return; }    // 8BitDo R shoulder
+    if (e.key === 'F11') { e.preventDefault(); textMe(); return; }    // 8BitDo X
+    if (e.key === 'F12') { e.preventDefault(); reloadTerminal(); return; }  // 8BitDo Y
+
+    // --- Remaining keys forwarded to tmux ---
+    if (e.key === 'Escape') { e.preventDefault(); sendKey('Escape'); return; }   // 8BitDo L shoulder
     if (e.key === 'Tab') { e.preventDefault(); sendKey('Tab'); return; }
     if (e.key === 'Backspace') { e.preventDefault(); sendKey('BSpace'); return; }
 });
@@ -280,7 +261,7 @@ function sendCommand(text) {
 
 function saveScreenshot() {
     setStatus('Saving...');
-    fetch('/api/screenshot/save', {method:'POST'})
+    fetch('/api/screenshot/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session: ACTIVE_SESSION})})
         .then(r => r.json().then(d => {
             if (r.ok) setStatus('Screenshot saved');
             else setStatus('Save failed: ' + (d.error || 'empty screen'));
@@ -290,27 +271,48 @@ function saveScreenshot() {
 
 function textMe() {
     setStatus('Sending text...');
-    fetch('/api/text-me', {method:'POST'})
+    fetch('/api/text-me', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session: ACTIVE_SESSION})})
         .then(r => r.json().then(d => {
-            if (r.ok) setStatus('Text queued — SMS on its way');
-            else setStatus('Text failed: ' + (d.error || 'unknown'));
+            if (!r.ok) { setStatus('Text failed: ' + (d.error || 'unknown')); return; }
+            setStatus('Summarizing...');
+            // Poll for result every 2s, up to 30s
+            let checks = 0;
+            const poll = setInterval(() => {
+                checks++;
+                fetch('/api/text-status/' + d.job).then(r => r.json()).then(s => {
+                    if (s.status === 'sent') { clearInterval(poll); setStatus('Text sent!'); }
+                    else if (s.status === 'failed') { clearInterval(poll); setStatus('Text failed'); }
+                    else if (s.status === 'timeout') { clearInterval(poll); setStatus('Text timed out'); }
+                    else if (checks >= 15) { clearInterval(poll); setStatus('Text still processing...'); }
+                }).catch(() => {});
+            }, 2000);
         }))
         .catch(() => setStatus('Text failed: server error'));
 }
 
 function playMe() {
-    setStatus('Playing...');
-    fetch('/api/play-me', {method:'POST'})
+    setStatus('Generating audio...');
+    fetch('/api/play-me', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session: ACTIVE_SESSION})})
         .then(r => r.json().then(d => {
-            if (r.ok) setStatus('Play queued — audio on its way');
-            else setStatus('Play failed: ' + (d.error || 'unknown'));
+            if (!r.ok) { setStatus('Play failed: ' + (d.error || 'unknown')); return; }
+            setStatus('Summarizing → TTS...');
+            let checks = 0;
+            const poll = setInterval(() => {
+                checks++;
+                fetch('/api/text-status/' + d.job).then(r => r.json()).then(s => {
+                    if (s.status === 'sent') { clearInterval(poll); setStatus('Audio sent!'); }
+                    else if (s.status === 'failed') { clearInterval(poll); setStatus('Play failed'); }
+                    else if (s.status === 'timeout') { clearInterval(poll); setStatus('Play timed out'); }
+                    else if (checks >= 30) { clearInterval(poll); setStatus('Play still processing...'); }
+                }).catch(() => {});
+            }, 2000);
         }))
         .catch(() => setStatus('Play failed: server error'));
 }
 
 function copyScreen() {
     setStatus('Copying...');
-    fetch('/api/screenshot', {method:'POST'})
+    fetch('/api/screenshot', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session: ACTIVE_SESSION})})
         .then(r => r.json())
         .then(d => {
             if (!d.text) { setStatus('Nothing to copy'); return; }
@@ -336,6 +338,17 @@ function fallbackCopy(text) {
     document.body.removeChild(ta);
 }
 
+function reloadTerminal() {
+    const frame = document.getElementById('term-' + ACTIVE_SESSION);
+    if (frame) {
+        frame.src = frame.src;
+        setStatus('Reloaded');
+        // Steal focus back from iframe after it loads
+        setTimeout(() => document.body.focus(), 500);
+        setTimeout(() => document.body.focus(), 1500);
+    }
+}
+
 function toggleHamburger() {
     const panel = document.getElementById('hamburger-panel');
     panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
@@ -345,6 +358,23 @@ function toggleHamburger() {
 function applyTheme(id) {
     document.body.className = document.body.className.replace(/theme-\w+/g, '').trim();
     document.body.classList.add('theme-' + id);
+}
+
+// --- Tab navigation helpers ---
+let _lastSession = null;
+
+function switchToLastSession() {
+    if (_lastSession && _lastSession !== ACTIVE_SESSION) {
+        switchSession(_lastSession);
+    }
+}
+
+function switchSessionByOffset(offset) {
+    const ids = _sessions.map(s => s.id);
+    const idx = ids.indexOf(ACTIVE_SESSION);
+    if (idx < 0) return;
+    const next = (idx + offset + ids.length) % ids.length;
+    switchSession(ids[next]);
 }
 
 // --- Session/tab management ---
@@ -361,6 +391,7 @@ async function switchSession(id) {
             return;
         }
         // Only update after backend confirms
+        _lastSession = ACTIVE_SESSION;
         ACTIVE_SESSION = id;
         document.querySelectorAll('.terminal-wrap').forEach(w => {
             w.style.display = w.id === 'wrap-' + id ? '' : 'none';
@@ -417,21 +448,45 @@ async function refreshSessions() {
 // --- Auto-reconnect terminal iframes ---
 // When page becomes visible again (phone unlocked, tab switched back),
 // reload all terminal iframes so you never see "hit enter to reconnect"
+// Delay reload slightly so layout settles first (prevents 1-char-wide collapse)
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-        document.querySelectorAll('.terminal-frame').forEach(f => {
-            try { f.src = f.src; } catch(e) {}
-        });
+        // Grab focus so keyboard/8BitDo events reach our keydown handler
+        document.body.focus();
+        setTimeout(() => {
+            document.querySelectorAll('.terminal-frame').forEach(f => {
+                try { f.src = f.src; } catch(e) {}
+            });
+            document.body.focus(); // re-grab after iframe reload
+        }, 300);
     }
+});
+
+// --- Keep focus on controls, not iframes ---
+// When an iframe steals focus, pull it back so controller/keyboard events work
+window.addEventListener('blur', () => {
+    setTimeout(() => {
+        if (document.activeElement && document.activeElement.tagName === 'IFRAME') {
+            document.body.focus();
+        }
+    }, 100);
 });
 
 // --- Cleanup ---
 window.addEventListener('beforeunload', () => {
+    // Clear iframe sources first so ttyd's own beforeunload dialog doesn't fire
+    document.querySelectorAll('.terminal-frame').forEach(f => { try { f.src = 'about:blank'; } catch(e) {} });
     if (audioStream) audioStream.getTracks().forEach(t => t.stop());
     if (recorder && recorder.state === 'recording') try { recorder.stop(); } catch(e) {}
 });
 
-window.addEventListener('load', () => { applyTheme(ACTIVE_SESSION); refreshSessions(); });
+window.addEventListener('load', () => {
+    applyTheme(ACTIVE_SESSION);
+    refreshSessions();
+    // Ensure body has focus so 8BitDo/keyboard events reach keydown handler
+    document.body.focus();
+    setTimeout(() => document.body.focus(), 500);
+});
 setInterval(refreshSessions, 10000);
 </script>
 </body>

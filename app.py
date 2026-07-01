@@ -68,6 +68,7 @@ SESSIONS = [
 # In-memory state
 _active_session_id = SESSIONS[0]["id"]
 _last_text = None
+_text_jobs = {}  # job_id -> "pending" | "sent" | "failed" | "timeout"
 
 
 def get_session():
@@ -268,7 +269,7 @@ def rename_session():
 
 ALLOWED_KEYS = {
     "Enter", "Escape", "Tab", "BTab", "Up", "Down", "Left", "Right",
-    "Space", "PageUp", "PageDown", "C-c", "C-z", "C-d", "BSpace",
+    "Space", "PageUp", "PageDown", "C-c", "C-z", "C-d", "C-u", "BSpace",
 }
 
 
@@ -305,7 +306,7 @@ def type_char():
     text = data.get("text", "")
     if not text:
         return jsonify({"error": "No text"}), 400
-    tmux = get_session()["tmux"]
+    tmux = _resolve_session(data)
     subprocess.run(
         _tmux_cmd("send-keys", "-t", tmux, "-l", "--", text),
         capture_output=True, timeout=15,
@@ -328,7 +329,8 @@ def scroll():
 
 @app.route("/api/screenshot", methods=["POST"])
 def screenshot():
-    tmux = get_session()["tmux"]
+    data = request.get_json() or {}
+    tmux = _resolve_session(data)
     result = subprocess.run(
         _tmux_cmd("capture-pane", "-t", tmux, "-p"),
         capture_output=True, timeout=15,
@@ -341,7 +343,8 @@ def screenshot():
 @app.route("/api/screenshot/save", methods=["POST"])
 def screenshot_save():
     """Capture visible pane and save to C:/dev/."""
-    tmux = get_session()["tmux"]
+    data = request.get_json() or {}
+    tmux = _resolve_session(data)
     result = subprocess.run(
         _tmux_cmd("capture-pane", "-t", tmux, "-p"),
         capture_output=True, timeout=15,
@@ -367,9 +370,9 @@ def screenshot_save():
     return jsonify({"ok": True})
 
 
-def _capture_scrollback(lines=200):
-    """Capture last N lines of scrollback from active tmux session."""
-    tmux = get_session()["tmux"]
+def _capture_scrollback(lines=200, session_id=None):
+    """Capture last N lines of scrollback from given (or active) tmux session."""
+    tmux = _resolve_session({"session": session_id} if session_id else {})
     result = subprocess.run(
         _tmux_cmd("capture-pane", "-t", tmux, "-p", "-S", f"-{lines}"),
         capture_output=True, timeout=15,
@@ -396,53 +399,84 @@ def _write_scrollback(text):
 @app.route("/api/text-me", methods=["POST"])
 def text_me():
     """Capture scrollback, summarize via mente, SMS via buzz."""
-    text = _capture_scrollback()
+    data = request.get_json() or {}
+    sid = data.get("session")
+    text = _capture_scrollback(lines=50, session_id=sid)
     if not text:
         return jsonify({"ok": False, "error": "Nothing to capture"}), 400
     tmp, win_tmp = _write_scrollback(text)
+
+    # Track result so we can report back
+    import uuid
+    job_id = str(uuid.uuid4())[:8]
+    _text_jobs[job_id] = "pending"
 
     def _do():
         try:
             result = subprocess.run(
                 [_WIN_PYTHON, "C:/dev/spark/notify.py", "text", win_tmp],
-                capture_output=True, timeout=120,
+                capture_output=True, timeout=30,
                 encoding="utf-8", errors="replace",
             )
-            logging.info(f"TEXT_ME: {result.stdout.strip()}")
-            if result.returncode != 0:
+            if result.returncode == 0:
+                logging.info(f"TEXT_ME OK: {result.stdout.strip()}")
+                _text_jobs[job_id] = "sent"
+            else:
                 logging.error(f"TEXT_ME_ERR: {result.stderr.strip()}")
+                _text_jobs[job_id] = "failed"
+        except subprocess.TimeoutExpired:
+            logging.error("TEXT_ME: timed out after 30s")
+            _text_jobs[job_id] = "timeout"
+        except Exception as e:
+            logging.error(f"TEXT_ME: {e}")
+            _text_jobs[job_id] = "failed"
         finally:
             try: tmp.unlink(missing_ok=True)
             except Exception: pass
 
     threading.Thread(target=_do, daemon=True).start()
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "job": job_id})
 
 
 @app.route("/api/play-me", methods=["POST"])
 def play_me():
     """Capture scrollback, summarize as Alan Watts, TTS + Telegram."""
-    text = _capture_scrollback()
+    data = request.get_json() or {}
+    sid = data.get("session")
+    text = _capture_scrollback(lines=50, session_id=sid)
     if not text:
         return jsonify({"ok": False, "error": "Nothing to capture"}), 400
     tmp, win_tmp = _write_scrollback(text)
+
+    import uuid
+    job_id = str(uuid.uuid4())[:8]
+    _text_jobs[job_id] = "pending"
 
     def _do():
         try:
             result = subprocess.run(
                 [_WIN_PYTHON, "C:/dev/spark/notify.py", "play", win_tmp],
-                capture_output=True, timeout=180,
+                capture_output=True, timeout=90,
                 encoding="utf-8", errors="replace",
             )
-            logging.info(f"PLAY_ME: {result.stdout.strip()}")
-            if result.returncode != 0:
+            if result.returncode == 0:
+                logging.info(f"PLAY_ME OK: {result.stdout.strip()}")
+                _text_jobs[job_id] = "sent"
+            else:
                 logging.error(f"PLAY_ME_ERR: {result.stderr.strip()}")
+                _text_jobs[job_id] = "failed"
+        except subprocess.TimeoutExpired:
+            logging.error("PLAY_ME: timed out after 60s")
+            _text_jobs[job_id] = "timeout"
+        except Exception as e:
+            logging.error(f"PLAY_ME: {e}")
+            _text_jobs[job_id] = "failed"
         finally:
             try: tmp.unlink(missing_ok=True)
             except Exception: pass
 
     threading.Thread(target=_do, daemon=True).start()
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "job": job_id})
 
 
 @app.route("/api/retry", methods=["POST"])
@@ -465,7 +499,9 @@ def voice_text():
 
 @app.route("/api/paste-text", methods=["POST"])
 def paste_text():
-    """Paste text into tmux without hitting Enter — lets user accumulate input."""
+    """Paste text into tmux without hitting Enter — lets user accumulate input.
+    Uses set-buffer + paste-buffer to handle long text reliably
+    (send-keys -l truncates at ~500 chars)."""
     data = request.get_json()
     text = (data.get("text") or "").strip()
     if not text:
@@ -473,11 +509,16 @@ def paste_text():
     global _last_text
     _last_text = text
     tmux = _resolve_session(data)
+    # Load text into tmux paste buffer, then paste it — no length limit
     subprocess.run(
-        _tmux_cmd("send-keys", "-t", tmux, "-l", "--", text),
+        _tmux_cmd("set-buffer", "--", text),
         capture_output=True, timeout=15,
     )
-    logging.info(f"PASTE text='{text[:80]}' session={tmux} (no enter)")
+    subprocess.run(
+        _tmux_cmd("paste-buffer", "-t", tmux),
+        capture_output=True, timeout=15,
+    )
+    logging.info(f"PASTE text='{text[:80]}' ({len(text)} chars) session={tmux} (no enter)")
     return jsonify({"ok": True, "input": text})
 
 
@@ -497,6 +538,12 @@ def transcribe():
     except Exception as e:
         logging.info(f"[Spark] TRANSCRIBE ERROR: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/text-status/<job_id>")
+def text_status(job_id):
+    status = _text_jobs.get(job_id, "unknown")
+    return jsonify({"status": status})
 
 
 @app.route("/api/log", methods=["POST"])

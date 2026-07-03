@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
     <title>Spark</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.7">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.9">
 </head>
 <body tabindex="-1">
 
@@ -445,25 +445,37 @@ async function refreshSessions() {
     } catch(e) {}
 }
 
+// --- Sync routine: make backend match what the frontend shows ---
+async function syncSession() {
+    try {
+        await fetch('/api/session', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({id: ACTIVE_SESSION}),
+        });
+    } catch(e) {}
+    // Show correct iframe, hide others
+    document.querySelectorAll('.terminal-wrap').forEach(w => {
+        w.style.display = w.id === 'wrap-' + ACTIVE_SESSION ? '' : 'none';
+    });
+    applyTheme(ACTIVE_SESSION);
+    document.body.focus();
+}
+
 // --- Auto-reconnect terminal iframes ---
-// When page becomes visible again (phone unlocked, tab switched back),
-// reload all terminal iframes so you never see "hit enter to reconnect"
-// Delay reload slightly so layout settles first (prevents 1-char-wide collapse)
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-        // Grab focus so keyboard/8BitDo events reach our keydown handler
-        document.body.focus();
+        syncSession();
+        refreshSessions();
         setTimeout(() => {
             document.querySelectorAll('.terminal-frame').forEach(f => {
                 try { f.src = f.src; } catch(e) {}
             });
-            document.body.focus(); // re-grab after iframe reload
+            document.body.focus();
         }, 300);
     }
 });
 
 // --- Keep focus on controls, not iframes ---
-// When an iframe steals focus, pull it back so controller/keyboard events work
 window.addEventListener('blur', () => {
     setTimeout(() => {
         if (document.activeElement && document.activeElement.tagName === 'IFRAME') {
@@ -474,17 +486,14 @@ window.addEventListener('blur', () => {
 
 // --- Cleanup ---
 window.addEventListener('beforeunload', () => {
-    // Clear iframe sources first so ttyd's own beforeunload dialog doesn't fire
     document.querySelectorAll('.terminal-frame').forEach(f => { try { f.src = 'about:blank'; } catch(e) {} });
     if (audioStream) audioStream.getTracks().forEach(t => t.stop());
     if (recorder && recorder.state === 'recording') try { recorder.stop(); } catch(e) {}
 });
 
 window.addEventListener('load', () => {
-    applyTheme(ACTIVE_SESSION);
+    syncSession();
     refreshSessions();
-    // Ensure body has focus so 8BitDo/keyboard events reach keydown handler
-    document.body.focus();
     setTimeout(() => document.body.focus(), 500);
 });
 setInterval(refreshSessions, 10000);

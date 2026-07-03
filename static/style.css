@@ -169,8 +169,11 @@ body {
 
 #mic-btn.recording {
     background: var(--danger);
-    border-color: var(--danger);
-    animation: pulse 1.5s infinite;
+    border-color: #fff;
+    border-width: 3px;
+    color: #fff;
+    box-shadow: 0 0 0 4px var(--danger), 0 0 20px rgba(220, 38, 38, 0.6);
+    animation: rec-pulse 1s infinite;
 }
 
 /* Tabs */
@@ -317,10 +320,23 @@ body.theme-bravo .btn-mic { background: #1a73e8; border-color: #1a73e8; }
 body.theme-bravo .btn-enter { background: var(--theme-dim); border-color: rgba(26,115,232,0.3); color: var(--theme); }
 body.theme-bravo #controls { border-top-color: rgba(26,115,232,0.3); }
 
+/* Recording override — always red+glow regardless of session theme */
+body.theme-dev #mic-btn.recording,
+body.theme-alpha #mic-btn.recording,
+body.theme-bravo #mic-btn.recording {
+    background: var(--danger);
+    border-color: #fff;
+}
+
 /* Animations */
 @keyframes pulse {
     0%, 100% { transform: scale(1); opacity: 1; }
     50% { transform: scale(1.05); opacity: 0.9; }
+}
+
+@keyframes rec-pulse {
+    0%, 100% { box-shadow: 0 0 0 4px var(--danger), 0 0 20px rgba(220, 38, 38, 0.6); }
+    50% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0.4), 0 0 30px rgba(220, 38, 38, 0.8); }
 }
 
 /* Utilities */

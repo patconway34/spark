@@ -4,7 +4,7 @@
 # Environment variables (all optional):
 #   SPARK_PROJECT_DIR  — working directory for tmux sessions (default: $HOME)
 
-SESSIONS=("claude" "claude2" "claude3")
+SESSIONS=("spark1" "spark2" "spark3")
 PORTS=(7682 7683 7684)
 WORK_DIR="/mnt/c/dev"
 

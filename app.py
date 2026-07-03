@@ -54,13 +54,13 @@ PORT = 5023
 HOST = "0.0.0.0"
 
 SESSIONS = [
-    {"id": "dev", "name": "Dev", "tmux": "claude", "ttyd_port": 7682,
+    {"id": "dev", "name": "Dev", "tmux": "spark1", "ttyd_port": 7682,
      "local_url": "http://localhost:7682",
      "remote_url": "https://terminal.tradingdata.net"},
-    {"id": "alpha", "name": "Alpha", "tmux": "claude2", "ttyd_port": 7683,
+    {"id": "alpha", "name": "Alpha", "tmux": "spark2", "ttyd_port": 7683,
      "local_url": "http://localhost:7683",
      "remote_url": "https://terminal2.tradingdata.net"},
-    {"id": "bravo", "name": "Bravo", "tmux": "claude3", "ttyd_port": 7684,
+    {"id": "bravo", "name": "Bravo", "tmux": "spark3", "ttyd_port": 7684,
      "local_url": "http://localhost:7684",
      "remote_url": "https://terminal3.tradingdata.net"},
 ]
@@ -597,4 +597,4 @@ if __name__ == "__main__":
     if not os.environ.get("WERKZEUG_RUN_MAIN"):
         _kill_port(PORT)
     print(f"[Spark] Voice layer on port {PORT}")
-    app.run(host=HOST, port=PORT, debug=True)
+    app.run(host=HOST, port=PORT, debug=False)

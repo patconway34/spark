@@ -15,3 +15,9 @@ events.jsonl
 detection_screens/
 detection.jsonl
 *.bat
+
+# Runtime artifacts — recordings, rotated logs, scrollback dumps
+*.log.*
+_listen_*.mp3
+_scrollback_*.txt
+listen_log.txt

@@ -1,0 +1,18 @@
+# Spark terminal names — one line per terminal, format: N=name
+# Leave the name blank to show just the number.
+# Hot-reloaded: edit this file and refresh the page (no restart needed).
+1=red
+2=manna
+3=marina
+4=plato
+5=compass
+6=orbit
+7=moss
+8=canopy
+9=frost
+10=camino
+11=
+12=
+13=
+14=
+15=

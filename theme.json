@@ -1,0 +1,72 @@
+{
+  "_comment": "Spark colors — edit and re-apply. Each entry in 'terminals' is one screen: 'color' is the solid identity (tab button + active MIC/ESC/ENTER theme) and 'background' is the pale tint the terminal itself uses. 'terminal' is the shared base theme (text + ANSI). After editing 'terminals'/'terminal', re-run start.sh (or relaunch ttyd) AND restart the Spark app (port 5023) so tab colors refresh. 'ui' = neutral app chrome. 'palette' = swatches to copy from, NOT applied directly.",
+
+  "palette": {
+    "_note": "Reference only. Copy any value into terminal.background / ui.bg / etc. Backgrounds run lightest -> most faded/tan. Current theme = Gruvbox Light Medium.",
+    "bg_white_ish":  "#f9f5d7",
+    "bg_cream":      "#fbf1c7",
+    "bg_faded":      "#f2e5bc",
+    "bg_soft_tan":   "#ecddb3",
+    "bg_muted":      "#ebdbb2",
+    "bg_tan":        "#e5d5ac",
+    "bg_deep_tan":   "#d5c4a1",
+    "bg_yellow_faded": "#fbf1c7",
+    "bg_red_faded":    "#f0d4cc",
+    "bg_green_faded":  "#e6e6c2",
+    "fg":            "#3c3836",
+    "fg_soft":       "#504945",
+    "fg_dim":        "#665c54",
+    "fg_faint":      "#7c6f64",
+    "red":           "#9d0006",
+    "green":         "#79740e",
+    "yellow":        "#b57614",
+    "blue":          "#076678",
+    "purple":        "#8f3f71",
+    "aqua":          "#427b58",
+    "orange":        "#af3a03",
+    "gray":          "#928374"
+  },
+
+  "terminal": {
+    "background": "#fbf1c7",
+    "foreground": "#3c3836",
+    "cursor": "#3c3836",
+    "cursorAccent": "#fbf1c7",
+    "selectionBackground": "#d5c4a1",
+    "black": "#fbf1c7",
+    "red": "#cc241d",
+    "green": "#98971a",
+    "yellow": "#d79921",
+    "blue": "#458588",
+    "magenta": "#b16286",
+    "cyan": "#689d6a",
+    "white": "#7c6f64",
+    "brightBlack": "#928374",
+    "brightRed": "#9d0006",
+    "brightGreen": "#79740e",
+    "brightYellow": "#b57614",
+    "brightBlue": "#076678",
+    "brightMagenta": "#8f3f71",
+    "brightCyan": "#427b58",
+    "brightWhite": "#3c3836"
+  },
+
+  "terminals": [
+    { "color": "#d23b3b", "background": "#f7dede" },
+    { "color": "#3f9d4f", "background": "#dff0e2" },
+    { "color": "#3564c0", "background": "#dde8f7" }
+  ],
+
+  "ui": {
+    "accent": "#d23b3b",
+    "bg": "#e6e6e6",
+    "surface": "#f2f2f2",
+    "surface_bright": "#ffffff",
+    "text": "#232323",
+    "text_dim": "#666666",
+    "text_muted": "#999999",
+    "border": "rgba(0,0,0,0.12)",
+    "border_strong": "rgba(0,0,0,0.22)",
+    "control_bg": "rgba(236,236,236,0.96)"
+  }
+}

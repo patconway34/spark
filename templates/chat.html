@@ -4,13 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
     <title>Spark</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.9">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=6.0">
+    <!-- UI colors from theme.json (overrides style.css :root). Edit theme.json,
+         restart the Spark app, and refresh to recolor the chrome. -->
+    <style>
+    :root {
+        --bg: {{ theme_ui.bg }};
+        --surface: {{ theme_ui.surface }};
+        --surface-bright: {{ theme_ui.surface_bright }};
+        --border: {{ theme_ui.border }};
+        --border-strong: {{ theme_ui.border_strong }};
+        --text: {{ theme_ui.text }};
+        --text-dim: {{ theme_ui.text_dim }};
+        --text-muted: {{ theme_ui.text_muted }};
+        --accent: {{ theme_ui.accent }};
+        --accent-dim: {{ theme_ui.accent_dim }};
+        --accent-glow: {{ theme_ui.accent_glow }};
+        --control-bg: {{ theme_ui.control_bg }};
+    }
+    body[class*="theme-"] { --theme: {{ theme_ui.accent }}; --theme-dim: {{ theme_ui.theme_dim }}; }
+    </style>
 </head>
 <body tabindex="-1">
 
 {% for s in sessions %}
-<div class="terminal-wrap" id="wrap-{{ s.id }}" style="{% if s.id != session.id %}display:none;{% endif %}">
-<iframe id="term-{{ s.id }}" class="terminal-frame" data-local="{{ s.local_url }}" data-remote="{{ s.remote_url }}"></iframe>
+<div class="terminal-wrap{% if s.id != session.id %} term-hidden{% endif %}" id="wrap-{{ s.id }}">
+<iframe id="term-{{ s.id }}" class="terminal-frame" data-local="{{ s.local_url }}" data-remote="{{ s.remote_url }}" data-bg="{{ s.bg }}"></iframe>
 </div>
 {% endfor %}
 
@@ -22,6 +41,9 @@
         <button class="btn key-btn ham-no" onclick="sendCommand('no')" style="height:28px;font-size:0.6rem;font-weight:600;">No</button>
         <button class="btn key-btn" onclick="sendCommand('/new')" style="height:28px;font-size:0.6rem;font-weight:600;">/new</button>
         <button class="btn key-btn" onclick="sendCommand('/compact')" style="height:28px;font-size:0.6rem;font-weight:600;">/compact</button>
+        <!-- Model switch (sends /model — switches model without running the chat) -->
+        <button class="btn key-btn" onclick="sendCommand('/model claude-fable-5')" style="height:28px;font-size:0.6rem;font-weight:600;">→ Fable 5</button>
+        <button class="btn key-btn" onclick="sendCommand('/model claude-opus-5')" style="height:28px;font-size:0.6rem;font-weight:600;">→ Opus 5</button>
         <!-- Navigation -->
         <button class="btn key-btn" onclick="sendKey('Tab')" style="height:28px;font-size:0.6rem;">Tab</button>
         <button class="btn key-btn" onclick="sendKey('BTab')" style="height:28px;font-size:0.6rem;">⇧Tab</button>
@@ -40,45 +62,177 @@
         <button class="btn key-btn" onclick="copyScreen()" style="height:28px;font-size:0.6rem;">📋 Copy</button>
         <button class="btn key-btn" onclick="textMe()" style="height:28px;font-size:0.6rem;">📲 Text</button>
         <button class="btn key-btn" onclick="playMe()" style="height:28px;font-size:0.6rem;">🔊 Play</button>
+        <button class="btn key-btn" onclick="listenMe()" style="height:28px;font-size:0.6rem;">🎧 Listen</button>
+        <button id="text-size-btn" class="btn key-btn" onclick="toggleTextSize()" style="height:28px;font-size:0.6rem;">🔍 Big Text</button>
     </div>
 
-    <!-- Row 1: Hamburger | PgUp | PgDn | Tabs -->
-    <div style="display:flex; align-items:center; margin-top:0.3rem; padding:0 0.2rem;">
-        <div style="width:30%; display:flex; gap:0.3rem; align-items:center; flex-shrink:0;">
-            <button class="btn key-btn" onclick="toggleHamburger()" style="font-size:0.7rem; flex:1; height:32px; padding:0;">☰</button>
-            <button class="btn key-btn" onclick="scrollTerminal('up')" style="font-size:0.5rem;flex:1;height:32px;padding:0;">PgUp</button>
-            <button class="btn key-btn" onclick="scrollTerminal('down')" style="font-size:0.5rem;flex:1;height:32px;padding:0;">PgDn</button>
-        </div>
-        <div id="tab-bar" style="width:70%; display:flex; gap:0.3rem; padding-left:0.3rem; overflow:hidden;">
-        </div>
-    </div>
+    <!-- Terminal tabs — one solid-colored button per terminal; tap or swipe to flip -->
+    <div id="term-bar"></div>
 
-    <!-- Type bar -->
-    <div style="display:flex; gap:0.3rem; padding:0.2rem 0.2rem 0;">
+    <!-- Row 2: Hamburger | PgUp | PgDn | Type bar -->
+    <div style="display:flex; gap:0.3rem; padding:0 0.2rem; align-items:center;">
+        <button class="btn key-btn" onclick="toggleHamburger()" style="font-size:0.7rem; flex:0 0 38px; height:32px; padding:0;">☰</button>
+        <button class="btn key-btn" onclick="scrollTerminal('up')" style="font-size:0.5rem; flex:0 0 38px; height:32px; padding:0;">PgUp</button>
+        <button class="btn key-btn" onclick="scrollTerminal('down')" style="font-size:0.5rem; flex:0 0 38px; height:32px; padding:0;">PgDn</button>
         <input id="type-bar" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
             placeholder="Type here..."
-            style="flex:1; height:36px; border:1px solid var(--border-strong); border-radius:6px; padding:0 8px; font-size:0.85rem; font-family:var(--font-mono); background:var(--surface); color:var(--text);">
-        <button class="btn key-btn" onclick="sendTyped()" style="height:36px; font-size:0.7rem; padding:0 10px; font-weight:600;">SEND</button>
-        <button class="btn key-btn" onclick="reloadTerminal()" style="height:36px; font-size:0.6rem; padding:0 6px;" title="Reload terminal">&#x21bb;</button>
+            style="flex:1; min-width:0; height:32px; border:1px solid var(--border-strong); border-radius:6px; padding:0 8px; font-size:0.85rem; font-family:var(--font-mono); background:#ffffff; color:#232323;">
+        <button class="btn key-btn" onclick="sendTyped()" style="height:32px; font-size:0.7rem; padding:0 10px; font-weight:600; flex:0 0 auto;">SEND</button>
+        <button class="btn key-btn" onclick="reloadTerminal()" style="height:32px; font-size:0.6rem; padding:0 6px; flex:0 0 auto;" title="Reload terminal">&#x21bb;</button>
     </div>
 
     <!-- Row 2: ESC | MIC | ENTER -->
     <div class="key-row" style="gap:0.5rem;">
-        <button class="btn big-btn btn-esc" onclick="sendKey('Escape')" style="flex:1;height:50px;">ESC</button>
+        <button class="btn big-btn btn-esc" onclick="sendKey('Escape')" style="flex:1;height:42px;">ESC</button>
         <button id="mic-btn" class="btn big-btn btn-mic" onclick="toggleMic()">MIC</button>
-        <button class="btn big-btn btn-enter" onclick="sendKey('Enter')" style="flex:1;height:50px;">ENTER</button>
+        <button class="btn big-btn btn-enter" onclick="pressEnter()" style="flex:1;height:42px;">ENTER</button>
     </div>
+    <!-- Bottom buffer to keep the controls above the Android gesture/nav bar.
+         Intentional — do NOT trim this (confirmed needed on Patrick's Android). -->
     <div style="height:60px;"></div>
 </div>
 
 <script>
-// --- Terminal iframe URLs ---
-(function() {
-    const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
-    document.querySelectorAll('.terminal-frame').forEach(f => {
-        f.src = isLocal ? f.dataset.local : f.dataset.remote;
-    });
+// --- TEMP mobile diagnostics: report JS errors + load beacons to spark.log ---
+// (First thing in the script so it catches errors in everything below.)
+(function(){
+  function beacon(m){ try{ fetch('/api/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({msg:'[CLIENT] '+m})}); }catch(e){} }
+  window.__beacon = beacon;
+  window.addEventListener('error', function(e){ beacon('JS ERROR: '+(e.message||'')+' @ '+((e.filename||'').split('/').pop())+':'+(e.lineno||'')+':'+(e.colno||'')); });
+  window.addEventListener('unhandledrejection', function(e){ beacon('PROMISE REJECT: '+((e.reason&&e.reason.message)||e.reason||'')); });
+  beacon('script START ua='+navigator.userAgent.slice(0,90));
+  window.addEventListener('DOMContentLoaded', function(){ beacon('DOMContentLoaded'); });
+  window.addEventListener('load', function(){ beacon('window load fired'); });
+  // Layout snapshot 1.8s after load: is content actually on screen?
+  window.addEventListener('load', function(){ setTimeout(function(){
+    try {
+      var c = document.getElementById('controls');
+      var aw = document.querySelector('.terminal-wrap:not(.term-hidden)');
+      var af = aw && aw.querySelector('.terminal-frame');
+      var loaded = 'n/a';
+      try { loaded = (af && af.contentDocument) ? 'same-origin-doc:'+(af.contentDocument.body?af.contentDocument.body.childElementCount:'nobody') : 'no-contentDoc'; } catch(e){ loaded = 'cross-origin('+e.name+')'; }
+      beacon('LAYOUT win='+innerWidth+'x'+innerHeight
+        +' controlsH='+(c?c.offsetHeight:'MISSING')
+        +' activeWrap='+(aw?aw.id:'NONE')
+        +' iframeSrc='+(af?(af.src||'EMPTY').slice(-22):'NOIFRAME')
+        +' iframe='+loaded
+        +' bodyH='+document.body.offsetHeight);
+    } catch(e){ beacon('LAYOUT ERR '+e.message); }
+  }, 1800); });
 })();
+
+// --- Terminal iframe URLs (LAZY: only the visible terminal is ever loaded) ---
+// All 4 terminals are same-origin now, so Chrome runs every iframe in ONE
+// renderer process. Four xterm.js instances (each with a large scrollback) in
+// a single process overruns mobile's per-process memory and the renderer
+// crashes to a white page. So we load ONLY the active session's iframe and
+// blank the rest; switching loads the target and unloads the previous.
+function _frameUrl(f) {
+    const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
+    return isLocal ? f.dataset.local : f.dataset.remote;
+}
+// ttyd's xterm focuses a hidden textarea on connect; on mobile that focus
+// flashes the soft keyboard for a moment. The frame is same-origin on the
+// phone, so as soon as that textarea appears, mark it readonly + inputmode=none
+// — a readonly field can't raise the keyboard even when focused, so no flash.
+// (Input never uses this field anyway; it all goes backend via send-keys.)
+function _suppressFrameKeyboard(f) {
+    let tries = 0;
+    const iv = setInterval(() => {
+        let ta = null;
+        try { ta = f.contentDocument && f.contentDocument.querySelector('.xterm-helper-textarea'); }
+        catch (e) { clearInterval(iv); return; }  // cross-origin (localhost dev) — no mobile keyboard to worry about
+        if (ta) {
+            ta.setAttribute('readonly', 'readonly');
+            ta.setAttribute('inputmode', 'none');
+            ta.blur();
+            clearInterval(iv);
+        } else if (++tries > 25) {
+            clearInterval(iv);
+        }
+    }, 120);
+}
+// Paint ttyd's own page background (html/body) with the terminal's tint so any
+// area not covered by the xterm rows — e.g. the strip at the bottom — shows the
+// pale tint instead of ttyd's default black. Same-origin on the tunnel; on
+// localhost dev it's cross-origin and silently no-ops. Re-applied on each load.
+function _paintFrameBg(f) {
+    const bg = f.dataset.bg;
+    if (!bg) return;
+    try {
+        const doc = f.contentDocument;
+        if (!doc || !doc.head) return;
+        let st = doc.getElementById('__spark_bg');
+        if (!st) { st = doc.createElement('style'); st.id = '__spark_bg'; doc.head.appendChild(st); }
+        st.textContent = `html,body{background:${bg} !important;}`;
+    } catch (e) { /* cross-origin (localhost dev) — ignore */ }
+}
+function _onFrameLoad(f) {
+    _suppressFrameKeyboard(f);
+    _paintFrameBg(f);
+    // ttyd may repaint its body shortly after connect; re-assert the tint once.
+    setTimeout(() => _paintFrameBg(f), 400);
+}
+// Keep the most-recently-viewed terminals loaded so switching back (and short
+// swipe runs) is instant instead of reloading the iframe every time. Capped to
+// bound mobile-renderer memory: raise MAX_LOADED for smoother switching across
+// more terminals, lower it (min 1) if the renderer ever runs out of memory.
+const MAX_LOADED = 3;
+let _loadedOrder = [];
+function _markLoaded(id) {
+    if (!id) return;
+    _loadedOrder = [id].concat(_loadedOrder.filter(x => x !== id));
+}
+function loadActiveTerminal() {
+    const wrap = document.querySelector('.terminal-wrap:not(.term-hidden)');
+    const f = wrap && wrap.querySelector('.terminal-frame');
+    if (!f) return;
+    _markLoaded(wrap.id.replace('wrap-', ''));
+    const blank = !f.src || f.src === 'about:blank' || f.src.startsWith('about:');
+    if (blank) {
+        f.src = _frameUrl(f);
+        f.addEventListener('load', () => _onFrameLoad(f), { once: true });
+    }
+}
+function unloadInactiveTerminals() {
+    // Blank only terminals that fell out of the recent (MAX_LOADED) set, so the
+    // recent ones stay live for instant switch-back. ttyd's leave-alert is
+    // disabled (start.sh -t disableLeaveAlert=true) so blanking is silent.
+    const keep = new Set(_loadedOrder.slice(0, MAX_LOADED));
+    keep.add(ACTIVE_SESSION);
+    document.querySelectorAll('.terminal-wrap').forEach(w => {
+        const id = w.id.replace('wrap-', '');
+        const f = w.querySelector('.terminal-frame');
+        if (f && !keep.has(id) && f.src && !f.src.startsWith('about:')) {
+            f.src = 'about:blank';
+        }
+    });
+}
+loadActiveTerminal();
+
+// With only 3 terminals, warm them ALL a moment after load so every switch is an
+// instant visibility flip (never a cold reload). MAX_LOADED (>= 3) keeps them live.
+function preloadAllTerminals() {
+    document.querySelectorAll('.terminal-wrap').forEach(w => {
+        const f = w.querySelector('.terminal-frame');
+        if (!f) return;
+        _markLoaded(w.id.replace('wrap-', ''));
+        if (!f.src || f.src.startsWith('about:')) {
+            f.src = _frameUrl(f);
+            f.addEventListener('load', () => _onFrameLoad(f), { once: true });
+        }
+    });
+}
+setTimeout(preloadAllTerminals, 500);
+
+// Mobile Chrome freezes/discards backgrounded tabs; a bfcache restore brings
+// the page back WITHOUT re-running this script, leaving iframes blank (white).
+// On a bfcache restore, force a full fresh reload (/ is no-store). On a plain
+// visibility flip, just re-load the active terminal if it was blanked.
+window.addEventListener('pageshow', (e) => { if (e.persisted) location.reload(); });
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') loadActiveTerminal();
+});
 
 // --- State ---
 let listening = false;
@@ -88,7 +242,7 @@ let chunks = [];
 let _sessions = [];
 let ACTIVE_SESSION = '{{ session.id }}';
 
-function setStatus(text) {
+function setStatus(text, persist = false) {
     let toast = document.getElementById('spark-toast');
     if (!toast) {
         toast = document.createElement('div');
@@ -99,7 +253,7 @@ function setStatus(text) {
     toast.textContent = text;
     toast.style.opacity = '1';
     clearTimeout(toast._tid);
-    toast._tid = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+    if (!persist) toast._tid = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
 }
 
 function sparkLog(msg) {
@@ -107,14 +261,20 @@ function sparkLog(msg) {
 }
 
 // --- Push-to-talk ---
-async function toggleMic() {
+// Enter while recording = stop → transcribe → paste → send in one go.
+function pressEnter() {
+    if (listening) { toggleMic(true); return; }
+    sendKey('Enter');
+}
+
+async function toggleMic(sendAfter = false) {
     const btn = document.getElementById('mic-btn');
     if (listening) {
         // Stop recording → transcribe → send
         listening = false;
         btn.classList.remove('recording');
         btn.textContent = 'MIC';
-        setStatus('Transcribing...');
+        setStatus('Transcribing...', true);
 
         if (recorder && recorder.state === 'recording') {
             const blob = await new Promise(resolve => {
@@ -131,9 +291,14 @@ async function toggleMic() {
                 const data = await res.json();
                 if (data.text && data.text.trim()) {
                     const text = data.text.trim();
-                    // Paste directly into terminal (no enter) — user sends when ready
-                    fetch('/api/paste-text', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text, session: ACTIVE_SESSION})});
-                    setStatus('Pasted — mic again or hit ENTER');
+                    // Paste directly into terminal — await so a follow-up Enter lands after the text
+                    await fetch('/api/paste-text', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text, session: ACTIVE_SESSION})});
+                    if (sendAfter) {
+                        await sendKey('Enter');
+                        setStatus('Sent: ' + text.slice(0, 60));
+                    } else {
+                        setStatus('Pasted — mic again or hit ENTER');
+                    }
                     sparkLog('TRANSCRIBED: ' + text);
                 } else {
                     setStatus('No speech detected');
@@ -142,6 +307,8 @@ async function toggleMic() {
                 setStatus('Transcribe failed');
                 sparkLog('TRANSCRIBE_ERR: ' + e.message);
             }
+        } else {
+            setStatus('Nothing recorded');
         }
 
         if (audioStream) {
@@ -162,7 +329,7 @@ async function toggleMic() {
             listening = true;
             btn.classList.add('recording');
             btn.textContent = 'REC';
-            setStatus('Recording...');
+            setStatus('Recording...', true);
             sparkLog('MIC_ON');
         } catch(e) {
             setStatus('Mic access denied');
@@ -199,16 +366,59 @@ document.addEventListener('DOMContentLoaded', () => {
 let _lastMicKey = 0;
 const MIC_DOUBLE_TAP_MS = 400;
 
+// --- Key debugger (temporary) ---
+let _debugMode = false;
+let _debugKeys = [];
+let _debugTimer = null;
 document.addEventListener('keydown', (e) => {
+    if (_debugMode) {
+        const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta'].filter(Boolean).join('+');
+        const label = (mods ? mods + '+' : '') + e.key + ' [' + e.code + ' #' + e.keyCode + ']';
+        _debugKeys.push(label);
+        clearTimeout(_debugTimer);
+        _debugTimer = setTimeout(() => {
+            const msg = 'KEY: ' + _debugKeys.join(' → ');
+            setStatus(msg);
+            fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({msg})}).catch(()=>{});
+            _debugKeys = [];
+        }, 300);
+        e.preventDefault();
+        return;
+    }
+
     // Skip if typing in the type-bar — all hotkeys disabled while typing
     if (e.target.id === 'type-bar') return;
 
-    // --- Mic toggle ---
+    // --- Mic toggle (desktop) ---
     if (e.ctrlKey && e.code === 'KeyM') { e.preventDefault(); toggleMic(); return; }
-    if (e.key === 'F9') { e.preventDefault(); toggleMic(); return; }  // 8BitDo A
+
+    // --- 8BitDo Profile 2, shifted layer (Shift+F-key combos) ---
+    // The 6 formerly-duplicate/dead buttons (A,B,X,R,R2) live here on clean
+    // Shift+F-keys so every physical button has a unique action. ❖ stays
+    // unbound (it's the power-off button). See "Button Map and Procedure".
+    if (e.shiftKey && e.key === 'F1') { e.preventDefault(); sendCommand('/new'); setStatus('/new'); return; }   // P2 ★  — /new
+    if (e.shiftKey && e.key === 'F8') { e.preventDefault(); listenMe(); return; }                              // P2 Y  — Listen (fresh read)
+    if (e.shiftKey && e.key === 'F2') { e.preventDefault(); textMe(); return; }                                // P2 A  — Text me (SMS)
+    if (e.shiftKey && e.key === 'F3') { e.preventDefault(); listenPlayPause(); return; }                       // P2 B  — Play/Pause read-back
+    if (e.shiftKey && e.key === 'F4') { e.preventDefault(); summaryMe(); return; }                             // P2 X  — Summary read (1-3 sentences, voice)
+    if (e.shiftKey && e.key === 'F5') { e.preventDefault(); sendKey('Tab'); return; }                          // P2 R  — Tab
+    if (e.shiftKey && e.key === 'F7') { e.preventDefault(); copyScreen(); return; }                            // P2 R2 — Copy screen
+
+    // --- 8BitDo Profile 2 (Android only delivers F1-F12; F13+ = Unidentified) ---
+    // F3/F5/F6/F11 skipped — Chrome uses them (find/reload/omnibox/fullscreen).
+    if (e.shiftKey || e.ctrlKey || e.altKey) return;  // base layer = unmodified keys only
+    // Rotated-90° hold (2026-07-14): d-pad actions shifted one step, +/− swapped
+    if (e.key === 'F9') { e.preventDefault(); switchSessionByOffset(1); return; }  // P2 D-pad Up — next session
+    if (e.key === 'F7') { e.preventDefault(); switchSessionByOffset(-1); return; } // P2 D-pad Down — prev session
+    if (e.key === 'F1') { e.preventDefault(); toggleMic(); return; }               // P2 D-pad Left — mic
+    if (e.key === 'F2') { e.preventDefault(); pressEnter(); return; }              // P2 D-pad Right — Enter
+    if (e.key === 'F4') { e.preventDefault(); sendKey('Escape'); return; }         // P2 L — clear
+    if (e.key === 'F8') { e.preventDefault(); sendKey('BSpace'); return; }         // P2 L2 — backspace
+    if (e.key === 'F12') { e.preventDefault(); scrollTerminal('up'); return; }     // P2 "−" — page up
+    if (e.key === 'F10') { e.preventDefault(); scrollTerminal('down'); return; }   // P2 "+" — page down
 
     // --- Send ---
-    if (e.key === 'Enter' && !e.ctrlKey) { e.preventDefault(); sendKey('Enter'); return; }  // 8BitDo B
+    if (e.key === 'Enter' && !e.ctrlKey) { e.preventDefault(); pressEnter(); return; }  // 8BitDo B
 
     // --- Scroll terminal ---
     if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); scrollTerminal('up'); return; }   // 8BitDo D-pad Up
@@ -217,11 +427,6 @@ document.addEventListener('keydown', (e) => {
     // --- Tab switching ---
     if (e.key === 'ArrowLeft') { e.preventDefault(); switchSessionByOffset(-1); return; }   // 8BitDo D-pad Left
     if (e.key === 'ArrowRight') { e.preventDefault(); switchSessionByOffset(1); return; }   // 8BitDo D-pad Right
-
-    // --- Actions ---
-    if (e.key === 'F10') { e.preventDefault(); playMe(); return; }    // 8BitDo R shoulder
-    if (e.key === 'F11') { e.preventDefault(); textMe(); return; }    // 8BitDo X
-    if (e.key === 'F12') { e.preventDefault(); reloadTerminal(); return; }  // 8BitDo Y
 
     // --- Remaining keys forwarded to tmux ---
     if (e.key === 'Escape') { e.preventDefault(); sendKey('Escape'); return; }   // 8BitDo L shoulder
@@ -251,7 +456,15 @@ async function sendKey(key) {
     }
 }
 
+// Throttle scroll so held-down keys (8BitDo d-pad auto-repeat fires every
+// ~30ms) can't fling the buffer to the top. One deliberate press = one
+// half-page; auto-repeat within the window is dropped. Deliberate taps are
+// slower than 200ms apart, so they still get through.
+let _lastScroll = 0;
 function scrollTerminal(direction) {
+    const now = Date.now();
+    if (now - _lastScroll < 200) return;
+    _lastScroll = now;
     fetch('/api/scroll', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({direction, session: ACTIVE_SESSION})});
 }
 
@@ -310,11 +523,94 @@ function playMe() {
         .catch(() => setStatus('Play failed: server error'));
 }
 
+// --- In-browser listen: summarize + TTS, played right here ---
+let _listenPlayer = null;
+// Tiny silent wav — played on the button tap to unlock mobile autoplay,
+// so the real mp3 can start later without a second gesture.
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+
+// Y button: full read-back of Claude's last reply.
+function listenMe() { _startListen('listen', '🎧'); }
+// X button: 1-3 sentence spoken summary of the same reply.
+function summaryMe() { _startListen('vsummary', '📝'); }
+
+function _startListen(mode, icon) {
+    // ALWAYS start a brand-new read-back. Never replay or toggle —
+    // that's what listenPlayPause() (B button) is for. Both modes share the
+    // same _listenPlayer, so B pauses/resumes whichever one is playing.
+    if (!_listenPlayer) _listenPlayer = new Audio();
+    // Kill whatever's currently loaded so a fresh capture always wins.
+    try { _listenPlayer.pause(); } catch (e) {}
+    _listenPlayer.src = SILENT_WAV;   // unlock mobile autoplay on the tap
+    _listenPlayer.play().catch(() => {});
+    setStatus(mode === 'vsummary' ? 'Summarizing...' : 'Generating audio...');
+    fetch('/api/listen', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session: ACTIVE_SESSION, mode: mode})})
+        .then(r => r.json().then(d => {
+            if (!r.ok) { setStatus('Failed: ' + (d.error || 'unknown')); return; }
+            setStatus('Summarizing → TTS...');
+            let checks = 0;
+            const poll = setInterval(() => {
+                checks++;
+                fetch('/api/text-status/' + d.job).then(r => r.json()).then(s => {
+                    if (s.status === 'ready') {
+                        clearInterval(poll);
+                        _listenPlayer.src = '/api/listen-audio/' + d.job;
+                        _listenPlayer.play()
+                            .then(() => setStatus('Playing...'))
+                            .catch(() => setStatus('Ready — tap ' + icon + ' to play'));
+                    }
+                    else if (s.status === 'failed') { clearInterval(poll); setStatus('Failed'); }
+                    else if (s.status === 'timeout') { clearInterval(poll); setStatus('Timed out'); }
+                    else if (checks >= 30) { clearInterval(poll); setStatus('Still processing...'); }
+                }).catch(() => {});
+            }, 2000);
+        }))
+        .catch(() => setStatus('Failed: server error'));
+}
+
+function listenPlayPause() {
+    // B button: pause/resume the CURRENT read-back. Never captures anything new.
+    if (!_listenPlayer || !_listenPlayer.src || _listenPlayer.src.includes('data:audio/wav')) {
+        setStatus('Nothing to play — tap 🎧 first');
+        return;
+    }
+    if (_listenPlayer.paused) {
+        _listenPlayer.play().then(() => setStatus('Playing...')).catch(() => setStatus('Play blocked'));
+    } else {
+        _listenPlayer.pause();
+        setStatus('Paused — press again to resume');
+    }
+}
+
+function cleanCapture(text) {
+    // Strip terminal junk, then join wrapped lines back into paragraphs.
+    const lines = text.split('\n').map(l => l
+        .replace(/[╭╮╰╯┌┐└┘├┤┬┴┼─━│┃═║▎]/g, ' ')   // box-drawing borders / quote bar
+        .replace(/[⏺●⎿✻✽✢❯]/g, ' ')                  // tool bullets / spinners / prompt
+        .replace(/ {2,}/g, ' ')
+        .trim());
+    const out = [];
+    for (const line of lines) {
+        if (!line) { out.push(''); continue; }
+        const isListItem = /^([-*•>]\s|\d+[.)]\s|#)/.test(line);
+        const prev = out.length ? out[out.length - 1] : '';
+        // Join with previous line unless it ended a sentence or this starts a list item
+        if (prev && !isListItem && !/[.:;!?]$/.test(prev)) {
+            out[out.length - 1] = prev + ' ' + line;
+        } else {
+            out.push(line);
+        }
+    }
+    return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function copyScreen() {
     setStatus('Copying...');
     fetch('/api/screenshot', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session: ACTIVE_SESSION})})
         .then(r => r.json())
         .then(d => {
+            if (!d.text) { setStatus('Nothing to copy'); return; }
+            d.text = cleanCapture(d.text);
             if (!d.text) { setStatus('Nothing to copy'); return; }
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(d.text)
@@ -349,6 +645,18 @@ function reloadTerminal() {
     }
 }
 
+// --- Large text toggle ---
+// body.big-text lays the iframes out at 62.5% size (xterm re-fits: fewer
+// columns, text rewraps) and scales them 1.6x to fill the screen.
+let _largeText = false;
+function toggleTextSize() {
+    _largeText = !_largeText;
+    document.body.classList.toggle('big-text', _largeText);
+    const btn = document.getElementById('text-size-btn');
+    if (btn) btn.textContent = _largeText ? '🔍 Normal Text' : '🔍 Big Text';
+    setStatus(_largeText ? 'Big text' : 'Normal text');
+}
+
 function toggleHamburger() {
     const panel = document.getElementById('hamburger-panel');
     panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
@@ -358,6 +666,25 @@ function toggleHamburger() {
 function applyTheme(id) {
     document.body.className = document.body.className.replace(/theme-\w+/g, '').trim();
     document.body.classList.add('theme-' + id);
+    // Drive --theme from the active session's own color so the ESC/MIC/ENTER
+    // buttons and the controls border match the active tab + terminal exactly —
+    // for any tab count, independent of the hardcoded CSS theme-N fallbacks.
+    const s = (_sessions || []).find(x => x.id === id);
+    if (s && s.color) {
+        const c = s.color.replace('#', '');
+        const r = parseInt(c.substr(0, 2), 16),
+              g = parseInt(c.substr(2, 2), 16),
+              b = parseInt(c.substr(4, 2), 16);
+        const S = document.body.style;
+        S.setProperty('--theme', s.color);
+        S.setProperty('--theme-dim', `rgba(${r},${g},${b},0.12)`);
+        // Contrast label color for solid-themed buttons (MIC) so bright hues get
+        // dark text instead of unreadable white.
+        S.setProperty('--theme-text',
+            (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#1a1a1a' : '#ffffff');
+        // Chrome (panel, surfaces) stays neutral grey from theme.json 'ui' for a
+        // standard look — only the buttons and active tab take the terminal color.
+    }
 }
 
 // --- Tab navigation helpers ---
@@ -378,31 +705,39 @@ function switchSessionByOffset(offset) {
 }
 
 // --- Session/tab management ---
-let _switching = false;
-async function switchSession(id) {
-    if (_switching || id === ACTIVE_SESSION) return;
-    _switching = true;
-    try {
-        const res = await fetch('/api/session', {
-            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}),
-        });
-        if (!res.ok) {
-            setStatus('Switch failed');
-            return;
-        }
-        // Only update after backend confirms
-        _lastSession = ACTIVE_SESSION;
-        ACTIVE_SESSION = id;
-        document.querySelectorAll('.terminal-wrap').forEach(w => {
-            w.style.display = w.id === 'wrap-' + id ? '' : 'none';
-        });
-        applyTheme(id);
-        renderTabs();
-    } catch(e) {
-        setStatus('Switch failed — check connection');
-    } finally {
-        _switching = false;
-    }
+// Optimistic + instant switch: flip the UI synchronously so a loaded terminal
+// appears with zero delay (no waiting on the network). The backend's active-
+// session sync is fire-and-forget — every keystroke/command already carries the
+// explicit session id (see sendKey/sendCommand), so routing stays correct even
+// before the backend catches up. Previously this AWAITED the POST before showing
+// the terminal, which added a full round-trip of latency to every switch.
+function switchSession(id) {
+    if (id === ACTIVE_SESSION) return;
+    _lastSession = ACTIVE_SESSION;
+    ACTIVE_SESSION = id;
+    document.querySelectorAll('.terminal-wrap').forEach(w => {
+        w.classList.toggle('term-hidden', w.id !== 'wrap-' + id);
+    });
+    // Lazy load: bring up the newly-active terminal, keep the recent ones loaded
+    // (MAX_LOADED) for instant switch-back, free the rest (mobile memory).
+    loadActiveTerminal();
+    unloadInactiveTerminals();
+    applyTheme(id);
+    renderTabs();
+    // Sync backend active session in the background; don't block the UI on it.
+    fetch('/api/session', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}),
+    }).catch(() => {});
+}
+
+// Pick black or white label text for a given tab color by perceived luminance
+// so bright accents (yellow, lime, amber) don't get unreadable white text.
+function _tabTextColor(hex) {
+    const c = hex.replace('#', '');
+    const r = parseInt(c.substr(0, 2), 16),
+          g = parseInt(c.substr(2, 2), 16),
+          b = parseInt(c.substr(4, 2), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#1a1a1a' : '#ffffff';
 }
 
 function createTabButton(s) {
@@ -412,7 +747,23 @@ function createTabButton(s) {
     const nameDiv = document.createElement('div');
     nameDiv.innerText = s.name || s.id;
     btn.appendChild(nameDiv);
-    if (!s.alive && s.id !== ACTIVE_SESSION) btn.style.opacity = '0.5';
+    // Neutral tabs — the names distinguish sessions, so no per-terminal colors.
+    // Only the active tab is filled (with the single charcoal accent, matching
+    // the Zenburn terminal) so it clearly stands out; the rest stay plain.
+    if (s.id === ACTIVE_SESSION && s.color) {
+        btn.style.background = s.color;
+        btn.style.borderColor = s.color;
+        btn.style.color = _tabTextColor(s.color);
+        btn.style.fontWeight = '700';
+        btn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.35)';
+    } else {
+        btn.style.background = '';
+        btn.style.borderColor = '';
+        btn.style.color = '';
+        btn.style.fontWeight = '600';
+        btn.style.boxShadow = 'none';
+    }
+    btn.style.opacity = (!s.alive && s.id !== ACTIVE_SESSION) ? '0.45' : '1';
     btn.onclick = () => switchSession(s.id);
     btn.oncontextmenu = (e) => {
         e.preventDefault();
@@ -430,10 +781,67 @@ async function renameSession(id, name) {
     } catch(e) {}
 }
 
+// One solid-colored pill per terminal (its own color). The active pill gets a
+// white inner ring + glow. Tapping switches; swipe/keys/double-click also work.
 function renderTabs() {
-    const bar = document.getElementById('tab-bar');
+    const bar = document.getElementById('term-bar');
+    if (!bar) return;
     bar.innerHTML = '';
-    _sessions.forEach(s => bar.appendChild(createTabButton(s)));
+    _sessions.forEach(s => {
+        const pill = document.createElement('button');
+        pill.className = 'term-pill' + (s.id === ACTIVE_SESSION ? ' active' : '');
+        pill.innerText = s.name || s.id;
+        if (s.color) {
+            pill.style.background = s.color;
+            pill.style.borderColor = s.color;
+            pill.style.color = _tabTextColor(s.color);
+        }
+        pill.onclick = () => switchSession(s.id);
+        pill.oncontextmenu = (e) => {
+            e.preventDefault();
+            const name = prompt('Rename terminal:', s.name);
+            if (name && name.trim()) renameSession(s.id, name.trim());
+        };
+        bar.appendChild(pill);
+    });
+}
+
+// --- Swipe the terminal left/right to flip between terminals. With 3 terminals,
+// one swipe each way reaches the other two. Ignores the controls area. ---
+(function(){
+    let sx = 0, sy = 0, st = 0, tracking = false;
+    const SWIPE = 60, VSLOP = 45;
+    function inControls(t){ return t && t.closest('#controls'); }
+    document.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1 || inControls(e.target)) { tracking = false; return; }
+        const t = e.touches[0];
+        sx = t.clientX; sy = t.clientY; st = Date.now(); tracking = true;
+    }, {passive:true});
+    document.addEventListener('touchmove', (e) => {
+        if (!tracking || e.touches.length !== 1) return;
+        const t = e.touches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+        if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) && e.cancelable) e.preventDefault();
+    }, {passive:false});
+    document.addEventListener('touchend', (e) => {
+        if (!tracking) return;
+        tracking = false;
+        const t = e.changedTouches[0];
+        const dx = t.clientX - sx, dy = t.clientY - sy, dt = Date.now() - st;
+        if (Math.abs(dx) < SWIPE || Math.abs(dy) > VSLOP || dt > 800) return;
+        if (dx < 0) switchSessionByOffset(1);   // swipe left  → next terminal
+        else switchSessionByOffset(-1);         // swipe right → previous terminal
+    }, {passive:true});
+})();
+
+// --- Desktop (mouse only): double-click the left/right half of the terminal to
+// flip terminals. Gated to fine pointers so it never fights double-tap-to-zoom
+// on touch, where swipe is used instead. (Keyboard ← / → also switch.) ---
+if (window.matchMedia && window.matchMedia('(pointer: fine)').matches) {
+    document.addEventListener('dblclick', (e) => {
+        if (e.target.closest('#controls')) return;   // leave the controls alone
+        if (e.clientX < window.innerWidth / 2) switchSessionByOffset(-1);  // left half  → previous
+        else switchSessionByOffset(1);                                     // right half → next
+    });
 }
 
 async function refreshSessions() {
@@ -442,6 +850,7 @@ async function refreshSessions() {
         const data = await res.json();
         _sessions = data.sessions;
         renderTabs();
+        applyTheme(ACTIVE_SESSION);   // keep MIC/ESC/ENTER matched to the active terminal
     } catch(e) {}
 }
 
@@ -455,21 +864,20 @@ async function syncSession() {
     } catch(e) {}
     // Show correct iframe, hide others
     document.querySelectorAll('.terminal-wrap').forEach(w => {
-        w.style.display = w.id === 'wrap-' + ACTIVE_SESSION ? '' : 'none';
+        w.classList.toggle('term-hidden', w.id !== 'wrap-' + ACTIVE_SESSION);
     });
     applyTheme(ACTIVE_SESSION);
     document.body.focus();
 }
 
-// --- Auto-reconnect terminal iframes ---
+// --- Auto-reconnect the ACTIVE terminal only (keeps one xterm in memory) ---
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
         syncSession();
         refreshSessions();
         setTimeout(() => {
-            document.querySelectorAll('.terminal-frame').forEach(f => {
-                try { f.src = f.src; } catch(e) {}
-            });
+            loadActiveTerminal();
+            unloadInactiveTerminals();
             document.body.focus();
         }, 300);
     }

@@ -5,18 +5,21 @@ as keystrokes into tmux sessions.
 """
 
 import hashlib
+import hmac
+import json
 import logging
 import os
 import signal
 import subprocess
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 import platform
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, make_response, render_template, request
+from flask import Flask, jsonify, make_response, render_template, request, send_file
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
@@ -32,38 +35,228 @@ app.secret_key = os.getenv("SPARK_SECRET_KEY") or hashlib.sha256(
     (str(Path(__file__).resolve().parent) + "spark-fallback").encode()
 ).hexdigest()
 
-# Auto-detect platform: on Windows, tmux runs via WSL; on Linux, directly
+# --- Auth ---
+# Spark is publicly tunneled (spark.tradingdata.net) and its API injects
+# keystrokes into live terminals. Every request must carry SPARK_TOKEN,
+# either as ?token=... (first visit — sets a cookie), the cookie, or an
+# X-Spark-Token header.
+
+SPARK_TOKEN = os.getenv("SPARK_TOKEN", "")
+
+
+def _token_ok():
+    supplied = (request.args.get("token")
+                or request.cookies.get("spark_token")
+                or request.headers.get("X-Spark-Token") or "")
+    return bool(SPARK_TOKEN) and hmac.compare_digest(supplied, SPARK_TOKEN)
+
+
+def _is_local_direct():
+    """True for genuine localhost requests. Tunnel traffic also arrives from
+    127.0.0.1 (cloudflared runs locally) but always carries CF headers."""
+    return (request.remote_addr == "127.0.0.1"
+            and "CF-Connecting-IP" not in request.headers)
+
+
+@app.before_request
+def _auth_guard():
+    if not SPARK_TOKEN:
+        return  # no token configured — auth disabled (warned at startup)
+    if request.path.startswith("/static/"):
+        return
+    if _is_local_direct() or _token_ok():
+        return
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Unauthorized"}), 401
+    return "Unauthorized — open with ?token=YOUR_SPARK_TOKEN", 401
+
+
+@app.after_request
+def _set_token_cookie(resp):
+    # First visit with ?token=... — persist it as a cookie for a year
+    if SPARK_TOKEN and request.args.get("token") == SPARK_TOKEN:
+        resp.set_cookie("spark_token", SPARK_TOKEN, max_age=31536000,
+                        httponly=True, samesite="Lax")
+    return resp
+
+
+# Auto-detect platform: on Windows, tmux runs via WSL; on Linux, directly.
+# GOTCHA (see gotchas/wsl-tmux-format-strings.md): plain `wsl tmux ...` runs the
+# command through bash, where `#` starts a comment — so tmux format strings like
+# #{alternate_on} get silently truncated and display-message returns the status
+# line instead. `wsl -e` execs tmux directly (no shell), preserving argv exactly.
 _IS_WINDOWS = platform.system() == "Windows"
-_TMUX_PREFIX = ["wsl", "tmux"] if _IS_WINDOWS else ["tmux"]
+_TMUX_PREFIX = ["wsl", "-e", "tmux"] if _IS_WINDOWS else ["tmux"]
+# tmux + Claude's transcripts both live inside WSL, so the retrieval engine runs there.
+_PY_PREFIX = ["wsl", "-e", "/usr/bin/python3"] if _IS_WINDOWS else ["/usr/bin/python3"]
 
 
 def _tmux_cmd(*args):
     """Build a tmux command list, adding 'wsl' prefix on Windows."""
     return _TMUX_PREFIX + list(args)
 
-# File logger
+# File logger — rotating so spark.log can never balloon again (it hit 33MB
+# from per-pageload beacons). 2MB cap + one backup is plenty for debugging.
+from logging.handlers import RotatingFileHandler
 _SPARK_DIR = Path(__file__).resolve().parent
 LOG_FILE = _SPARK_DIR / "spark.log"
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(message)s", datefmt="%H:%M:%S",
                     handlers=[
-                        logging.FileHandler(str(LOG_FILE)),
+                        RotatingFileHandler(str(LOG_FILE), maxBytes=2_000_000,
+                                            backupCount=1, encoding="utf-8"),
                         logging.StreamHandler(),
                     ])
 PORT = 5023
 HOST = "0.0.0.0"
 
-SESSIONS = [
-    {"id": "dev", "name": "Dev", "tmux": "spark1", "ttyd_port": 7682,
-     "local_url": "http://localhost:7682",
-     "remote_url": "https://terminal.tradingdata.net"},
-    {"id": "alpha", "name": "Alpha", "tmux": "spark2", "ttyd_port": 7683,
-     "local_url": "http://localhost:7683",
-     "remote_url": "https://terminal2.tradingdata.net"},
-    {"id": "bravo", "name": "Bravo", "tmux": "spark3", "ttyd_port": 7684,
-     "local_url": "http://localhost:7684",
-     "remote_url": "https://terminal3.tradingdata.net"},
+# Fifteen numbered tabs, each its own color + default Claude model:
+#   all opus 5 (2026-08-02: out of fable for the week — every tab defaults to opus).
+# Terminal colors are set by the ttyd themes in start.sh (per port); "color"
+# here is just the tab accent. "model" is the tab's default for launches.
+# Terminals are served same-origin under /term/<tmux> (cloudflare path rules +
+# ttyd -b base path). remote_url is relative so it inherits spark's origin and
+# its first-party CF Access cookie; local_url hits ttyd directly on localhost.
+# Colors are editable in theme.json (single source of truth). "terminal" drives
+# the ttyd themes (read by start.sh); "ui" drives the app chrome (read here and
+# injected into chat.html). Tabs are neutral — the tab NAMES distinguish sessions;
+# the one accent colors the active tab + the ESC/MIC/ENTER buttons (applyTheme).
+_THEME_FILE = _SPARK_DIR / "theme.json"
+
+# Gruvbox Light fallback if theme.json is missing or unparseable.
+_DEFAULT_UI = {
+    "accent": "#af3a03", "bg": "#ebdbb2", "surface": "#fbf1c7",
+    "surface_bright": "#f9f5d7", "text": "#3c3836", "text_dim": "#665c54",
+    "text_muted": "#7c6f64", "border": "rgba(60,56,54,0.14)",
+    "border_strong": "rgba(60,56,54,0.30)", "control_bg": "rgba(235,219,178,0.96)",
+}
+
+
+def _load_theme_ui():
+    """Return the 'ui' color dict from theme.json, over the defaults."""
+    ui = dict(_DEFAULT_UI)
+    try:
+        data = json.loads(_THEME_FILE.read_text(encoding="utf-8"))
+        ui.update(data.get("ui", {}) or {})
+    except (OSError, ValueError):
+        pass
+    return ui
+
+
+def _hex_to_rgba(color, alpha):
+    """#rrggbb -> 'rgba(r,g,b,a)'. Pass rgba()/unknown through untouched."""
+    c = str(color).lstrip("#")
+    if len(c) == 6:
+        try:
+            r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+            return f"rgba({r},{g},{b},{alpha})"
+        except ValueError:
+            pass
+    return color
+
+
+def _theme_ui_for_template():
+    """UI colors plus the accent-derived rgba tints the template needs."""
+    ui = _load_theme_ui()
+    ui["accent_dim"] = _hex_to_rgba(ui["accent"], 0.15)
+    ui["accent_glow"] = _hex_to_rgba(ui["accent"], 0.30)
+    ui["theme_dim"] = _hex_to_rgba(ui["accent"], 0.12)
+    return ui
+
+
+# Per-terminal colors (red/green/blue). Each terminal in theme.json's "terminals"
+# list has a "color" (the solid identity — tab button + active UI theme) and a
+# "background" (the pale tint the terminal itself uses, applied via start.sh).
+_DEFAULT_TERMINALS = [
+    {"color": "#d23b3b", "background": "#f7dede"},   # red
+    {"color": "#3f9d4f", "background": "#dff0e2"},   # green
+    {"color": "#3564c0", "background": "#dde8f7"},   # blue
 ]
+
+
+def _load_terminals():
+    """Return the 'terminals' list from theme.json, over the defaults."""
+    terms = [dict(t) for t in _DEFAULT_TERMINALS]
+    try:
+        data = json.loads(_THEME_FILE.read_text(encoding="utf-8"))
+        cfg = data.get("terminals")
+        if isinstance(cfg, list) and cfg:
+            terms = cfg
+    except (OSError, ValueError):
+        pass
+    return terms
+
+
+# Three terminals (2026-08-02): one swipe each way reaches the other two, and all
+# three stay loaded so switching is instant. tmux spark4-15 may still be running
+# in the background (their Claude sessions), just not surfaced here.
+_TERMINAL_COUNT = 3
+_TAB_MODELS = ["opus"] * _TERMINAL_COUNT
+_INITIAL_TERMINALS = _load_terminals()
+SESSIONS = [
+    {"id": str(n), "name": str(n), "tmux": f"spark{n}", "ttyd_port": 7681 + n,
+     "local_url": f"http://localhost:{7681 + n}/term/spark{n}",
+     "remote_url": f"/term/spark{n}",
+     "color": _INITIAL_TERMINALS[(n - 1) % len(_INITIAL_TERMINALS)].get("color", "#af3a03"),
+     "bg": _INITIAL_TERMINALS[(n - 1) % len(_INITIAL_TERMINALS)].get("background", "#ffffff"),
+     "model": _TAB_MODELS[n - 1]}
+    for n in range(1, _TERMINAL_COUNT + 1)
+]
+
+
+def _apply_terminal_colors():
+    """Refresh each session's tab color from theme.json 'terminals' (hot-reload)."""
+    terms = _load_terminals()
+    if not terms:
+        return
+    for i, s in enumerate(SESSIONS):
+        s["color"] = terms[i % len(terms)].get("color", s["color"])
+        s["bg"] = terms[i % len(terms)].get("background", s.get("bg", "#ffffff"))
+
+# Terminal names live in terminal_names.txt (format: N=name, blank = number).
+# Hot-reloaded on every /api/sessions poll so edits show up on refresh.
+_NAMES_FILE = _SPARK_DIR / "terminal_names.txt"
+
+
+def _load_terminal_names():
+    """Return {id: name} for non-blank entries in terminal_names.txt."""
+    names = {}
+    try:
+        for line in _NAMES_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            sid, _, name = line.partition("=")
+            sid, name = sid.strip(), name.strip()
+            if sid and name:
+                names[sid] = name
+    except OSError:
+        pass
+    return names
+
+
+def _apply_terminal_names():
+    names = _load_terminal_names()
+    for s in SESSIONS:
+        s["name"] = names.get(s["id"], s["id"])
+
+
+def _save_terminal_name(sid, name):
+    """Write one terminal's name back to terminal_names.txt."""
+    try:
+        lines = _NAMES_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = [f"{n}=" for n in range(1, _TERMINAL_COUNT + 1)]
+    for i, line in enumerate(lines):
+        if line.strip().partition("=")[0].strip() == sid:
+            lines[i] = f"{sid}={name}"
+            break
+    else:
+        lines.append(f"{sid}={name}")
+    _NAMES_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+_apply_terminal_names()
 
 # In-memory state
 _active_session_id = SESSIONS[0]["id"]
@@ -139,9 +332,38 @@ def send_to_claude(text, session_id=None):
 
 @app.route("/")
 def home():
+    _apply_terminal_names()
+    _apply_terminal_colors()
     active = get_session()
     resp = make_response(render_template("chat.html",
-        session=active, sessions=SESSIONS))
+        session=active, sessions=SESSIONS, theme_ui=_theme_ui_for_template()))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
+
+
+@app.route("/test")
+def test_page():
+    """Dead-simple baseline page — no terminals, no iframes, no external CSS.
+    If this renders on the phone, the browser/tunnel/Access/Spark are all fine
+    and the problem is isolated to the terminal page."""
+    html = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spark Test</title>
+<style>html,body{margin:0;padding:0;height:100%;}
+.band{height:20vh;display:flex;align-items:center;justify-content:center;color:#fff;font:700 26px sans-serif;}</style>
+</head>
+<body>
+<div class="band" style="background:#e11d48;">TOP (red)</div>
+<div class="band" style="background:#ea580c;">2 (orange)</div>
+<div class="band" style="background:#059669;">MIDDLE (green)</div>
+<div class="band" style="background:#2563eb;">4 (blue)</div>
+<div class="band" style="background:#7c3aed;">BOTTOM (purple)</div>
+<script>
+fetch('/api/log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({msg:'[CLIENT] TEST BANDS rendered win='+window.innerWidth+'x'+window.innerHeight+' scrollY='+window.scrollY+' docH='+document.documentElement.scrollHeight})}).catch(function(){});
+</script>
+</body></html>"""
+    resp = make_response(html)
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp
 
@@ -180,6 +402,8 @@ _SHELLS = {"bash", "sh", "zsh", "fish", "dash"}
 
 @app.route("/api/sessions")
 def api_sessions():
+    _apply_terminal_names()
+    _apply_terminal_colors()
     cmds = _pane_commands()
     out = []
     for s in SESSIONS:
@@ -191,10 +415,11 @@ def api_sessions():
     return jsonify({"sessions": out, "active": _active_session_id})
 
 
+# Verified against the live Models API 2026-07-25 — claude-opus-5 is real.
 CLAUDE_MODELS = {
     "fable": "claude-fable-5",
-    "opus": "claude-opus-4-6",
-    "sonnet": "claude-sonnet-4-6",
+    "opus": "claude-opus-5",
+    "sonnet": "claude-sonnet-5",
     "haiku": "claude-haiku-4-5-20251001",
 }
 CLAUDE_EFFORTS = ["low", "medium", "high"]
@@ -217,12 +442,17 @@ def launch_session():
     if not cmd:
         return jsonify({"error": "Unknown cli"}), 400
     if cli == "claude":
-        model_key = data.get("model", "opus")
-        effort = data.get("effort", "medium")
+        # Default model = the tab's own model (1-5 fable, 6-8 opus, 9 sonnet);
+        # an explicit "model" in the request overrides it. Effort is only passed
+        # when explicitly requested — otherwise claude uses the settings.json
+        # default (high), matching how sessions launch outside Spark.
+        tab_default = next((s["model"] for s in SESSIONS if s["id"] == sid), "opus")
+        model_key = data.get("model") or tab_default
         model_id = CLAUDE_MODELS.get(model_key, CLAUDE_MODELS["opus"])
-        if effort not in CLAUDE_EFFORTS:
-            effort = "medium"
-        cmd = cmd.format(model=model_id, effort=effort)
+        effort = data.get("effort")
+        cmd = f"claude --model {model_id}"
+        if effort in CLAUDE_EFFORTS:
+            cmd += f" --effort {effort}"
     for s in SESSIONS:
         if s["id"] == sid:
             tmux = s["tmux"]
@@ -261,7 +491,7 @@ def rename_session():
     for s in SESSIONS:
         if s["id"] == sid:
             s["name"] = name
-            s["custom_name"] = True
+            _save_terminal_name(sid, name)
             logging.info(f"SESSION_RENAME {sid} -> {name}")
             return jsonify({"ok": True, "session": s})
     return jsonify({"error": "Unknown session"}), 400
@@ -319,11 +549,40 @@ def scroll():
     data = request.get_json()
     direction = data.get("direction", "up")
     tmux = _resolve_session(data)
-    if direction == "up":
-        subprocess.run(_tmux_cmd("copy-mode", "-t", tmux), capture_output=True, timeout=15)
-        subprocess.run(_tmux_cmd("send-keys", "-t", tmux, "-X", "page-up"), capture_output=True, timeout=15)
+
+    # Two scroll worlds depending on the pane's screen buffer:
+    #  - ALTERNATE screen on (a full-screen TUI like Claude Code owns the pane):
+    #    the app has its OWN scrollback and tmux copy-mode would only surface the
+    #    pre-launch banner. Send the real PageUp/PageDown keys so the app scrolls.
+    #  - NORMAL screen (Claude rendering inline, or a plain shell): the scrollback
+    #    lives in tmux, so a PageUp keystroke goes nowhere — drive tmux copy-mode.
+    # Detect per-call because a tab can flip between the two (e.g. Bravo was in the
+    # normal buffer while the others were alt-screen, which knocked out its PageUp).
+    alt = subprocess.run(
+        _tmux_cmd("display-message", "-p", "-t", tmux, "#{alternate_on}"),
+        capture_output=True, timeout=15, encoding="utf-8", errors="replace",
+    ).stdout.strip()
+
+    if alt == "1":
+        if direction == "up":
+            subprocess.run(_tmux_cmd("send-keys", "-t", tmux, "PageUp"),
+                           capture_output=True, timeout=15)
+        else:
+            # down = a single page, symmetric with PageUp. Reaching the bottom
+            # returns to the live input; typing also auto-snaps there.
+            subprocess.run(_tmux_cmd("send-keys", "-t", tmux, "PageDown"),
+                           capture_output=True, timeout=15)
     else:
-        subprocess.run(_tmux_cmd("copy-mode", "-q", "-t", tmux), capture_output=True, timeout=15)
+        if direction == "up":
+            # -e = auto-exit copy-mode when scrolled back to the bottom
+            subprocess.run(_tmux_cmd("copy-mode", "-e", "-t", tmux),
+                           capture_output=True, timeout=15)
+            subprocess.run(_tmux_cmd("send-keys", "-X", "-t", tmux, "page-up"),
+                           capture_output=True, timeout=15)
+        else:
+            # page-down inside copy-mode; a no-op (and stays live) if not scrolled
+            subprocess.run(_tmux_cmd("send-keys", "-X", "-t", tmux, "page-down"),
+                           capture_output=True, timeout=15)
     return jsonify({"ok": True})
 
 
@@ -370,6 +629,33 @@ def screenshot_save():
     return jsonify({"ok": True})
 
 
+def _retrieve_last_turn(session_id=None):
+    """The shared engine behind Listen and Text-me. Identifies which Claude Code
+    conversation the tab is showing (via listen_retrieve.py's fingerprint) and
+    pulls its last real turn from the transcript file — clean, full, right tab.
+    Returns the parsed dict, or None if the engine itself failed (not just 'empty')."""
+    tmux = _resolve_session({"session": session_id} if session_id else {})
+    try:
+        result = subprocess.run(
+            _PY_PREFIX + ["/mnt/c/dev/spark/listen_retrieve.py", tmux],
+            capture_output=True, timeout=20, encoding="utf-8", errors="replace",
+        )
+        out = (result.stdout or "").strip()
+        if not out:
+            logging.error(f"RETRIEVE empty (stderr={(result.stderr or '').strip()[:200]})")
+            return None
+        return json.loads(out.splitlines()[-1])
+    except Exception as e:
+        logging.error(f"RETRIEVE: {e}")
+        return None
+
+
+def _turn_to_text(turn):
+    """Format a retrieved turn as clean input for the notify.py formatters."""
+    return (f"[PATRICK ASKED]\n{(turn.get('user') or '').strip()}\n\n"
+            f"[CLAUDE REPLIED]\n{(turn.get('assistant') or '').strip()}\n")
+
+
 def _capture_scrollback(lines=200, session_id=None):
     """Capture last N lines of scrollback from given (or active) tmux session."""
     tmux = _resolve_session({"session": session_id} if session_id else {})
@@ -398,16 +684,21 @@ def _write_scrollback(text):
 
 @app.route("/api/text-me", methods=["POST"])
 def text_me():
-    """Capture scrollback, summarize via mente, SMS via buzz."""
+    """Pull Claude's last reply from the transcript, clean for SMS, send via buzz."""
     data = request.get_json() or {}
     sid = data.get("session")
-    text = _capture_scrollback(lines=50, session_id=sid)
-    if not text:
-        return jsonify({"ok": False, "error": "Nothing to capture"}), 400
+    turn = _retrieve_last_turn(sid)
+    if turn is None:
+        text = _capture_scrollback(lines=50, session_id=sid)
+        if not text:
+            return jsonify({"ok": False, "error": "Nothing to capture"}), 400
+    elif turn.get("ok") and turn.get("assistant"):
+        text = _turn_to_text(turn)
+        logging.info(f"TEXT_ME via transcript {turn.get('file')}")
+    else:
+        return jsonify({"ok": False, "error": "Nothing to read yet"}), 400
     tmp, win_tmp = _write_scrollback(text)
 
-    # Track result so we can report back
-    import uuid
     job_id = str(uuid.uuid4())[:8]
     _text_jobs[job_id] = "pending"
 
@@ -448,7 +739,6 @@ def play_me():
         return jsonify({"ok": False, "error": "Nothing to capture"}), 400
     tmp, win_tmp = _write_scrollback(text)
 
-    import uuid
     job_id = str(uuid.uuid4())[:8]
     _text_jobs[job_id] = "pending"
 
@@ -477,6 +767,84 @@ def play_me():
 
     threading.Thread(target=_do, daemon=True).start()
     return jsonify({"ok": True, "job": job_id})
+
+
+_audio_files = {}  # job_id -> mp3 path
+
+
+@app.route("/api/listen", methods=["POST"])
+def listen_me():
+    """Capture scrollback, summarize ONLY the latest response (API path), TTS
+    to mp3 — played back in-browser. Captures more lines than the SMS/Play
+    paths so Patrick's last input is reliably in the window to slice from."""
+    data = request.get_json() or {}
+    sid = data.get("session")
+    # mode: "listen" = full reply read aloud (Y). "vsummary" = 1-3 sentence spoken
+    # summary (X) — same content as the Text button, but voiced instead of texted.
+    mode = data.get("mode", "listen")
+    if mode not in ("listen", "vsummary"):
+        mode = "listen"
+    turn = _retrieve_last_turn(sid)
+    if turn is None:
+        # Engine crashed/timed out — fall back to the old screen scrape so Listen
+        # never goes fully dead.
+        text = _capture_scrollback(lines=200, session_id=sid)
+        if not text:
+            return jsonify({"ok": False, "error": "Nothing to capture"}), 400
+    elif turn.get("ok") and turn.get("assistant"):
+        text = _turn_to_text(turn)
+        logging.info(f"LISTEN ({mode}) via transcript {turn.get('file')}")
+    else:
+        # Matched the tab but there's no answered turn yet (e.g. freshly cleared).
+        return jsonify({"ok": False, "error": "Nothing to read yet"}), 400
+    tmp, win_tmp = _write_scrollback(text)
+
+    # Clean up mp3s from previous listens
+    for old in _SPARK_DIR.glob("_listen_*.mp3"):
+        try: old.unlink()
+        except Exception: pass
+
+    job_id = str(uuid.uuid4())[:8]
+    _text_jobs[job_id] = "pending"
+
+    def _do():
+        try:
+            result = subprocess.run(
+                [_WIN_PYTHON, "C:/dev/spark/notify.py", mode, win_tmp],
+                capture_output=True, timeout=90,
+                encoding="utf-8", errors="replace",
+            )
+            mp3 = None
+            for line in (result.stdout or "").splitlines():
+                if line.startswith("MP3:"):
+                    mp3 = line[4:].strip()
+            if result.returncode == 0 and mp3:
+                logging.info(f"LISTEN OK: {mp3}")
+                _audio_files[job_id] = mp3
+                _text_jobs[job_id] = "ready"
+            else:
+                logging.error(f"LISTEN_ERR: {result.stderr.strip()}")
+                _text_jobs[job_id] = "failed"
+        except subprocess.TimeoutExpired:
+            logging.error("LISTEN: timed out after 90s")
+            _text_jobs[job_id] = "timeout"
+        except Exception as e:
+            logging.error(f"LISTEN: {e}")
+            _text_jobs[job_id] = "failed"
+        finally:
+            try: tmp.unlink(missing_ok=True)
+            except Exception: pass
+
+    threading.Thread(target=_do, daemon=True).start()
+    return jsonify({"ok": True, "job": job_id})
+
+
+@app.route("/api/listen-audio/<job_id>")
+def listen_audio(job_id):
+    path = _audio_files.get(job_id)
+    if not path or not Path(path).exists():
+        return jsonify({"error": "Audio not found"}), 404
+    return send_file(path, mimetype="audio/mpeg")
 
 
 @app.route("/api/retry", methods=["POST"])
@@ -596,5 +964,8 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, _handle_sigint)
     if not os.environ.get("WERKZEUG_RUN_MAIN"):
         _kill_port(PORT)
+    if not SPARK_TOKEN:
+        print("[Spark] WARNING: SPARK_TOKEN not set in .env — API is UNPROTECTED "
+              "and spark.tradingdata.net is public!")
     print(f"[Spark] Voice layer on port {PORT}")
     app.run(host=HOST, port=PORT, debug=False)

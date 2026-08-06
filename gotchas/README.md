@@ -14,4 +14,6 @@ understanding the gotcha it guards against.
 | [tmux-window-size.md](tmux-window-size.md) | window-size largest = phone view cut off on the right |
 | [api-key-boundary.md](api-key-boundary.md) | ANTHROPIC_API_KEY: Listen button only, never terminals |
 | [ttyd-restart.md](ttyd-restart.md) | ttyd restart races and self-killing pkill |
+| [tmux-trailing-semicolon.md](tmux-trailing-semicolon.md) | `ls -la;` arrives as `ls -la` — tmux eats a trailing `;` |
+| [wsl-interop-cost.md](wsl-interop-cost.md) | Every `wsl -e ...` costs ~130ms — why the tmux helper exists |
 | [misc.md](misc.md) | Smaller traps: send-keys truncation, debug beacons, mouse mode |

@@ -95,6 +95,140 @@ def _tmux_cmd(*args):
     """Build a tmux command list, adding 'wsl' prefix on Windows."""
     return _TMUX_PREFIX + list(args)
 
+
+# --- Persistent tmux channel ------------------------------------------------
+# Every `wsl -e tmux ...` spawn costs ~130ms of interop overhead. That is the
+# process launch, not tmux: `wsl -e true`, which does nothing at all, measures
+# the same 130ms. Spark was paying it on every keystroke, every scroll (2-3x)
+# and every 10s session poll.
+#
+# _TmuxChannel keeps ONE python3 helper alive inside WSL (tmux_helper.py) and
+# talks to it over stdin/stdout — ~2ms per round trip, and a batch of commands
+# costs one round trip instead of N.
+#
+# Every failure path falls back to the original per-call spawn, so the worst
+# case is the old speed rather than a dead terminal.
+
+_HELPER_WSL_PATH = "/mnt/c/dev/spark/tmux_helper.py"
+_HELPER_COOLDOWN = 30  # seconds to stop retrying a helper that won't start
+
+
+class _TmuxResult:
+    """Mimics the subprocess.CompletedProcess fields the call sites use."""
+    __slots__ = ("returncode", "stdout", "stderr")
+
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+class _TmuxChannel:
+    def __init__(self):
+        self._proc = None
+        self._lock = threading.Lock()
+        self._seq = 0
+        self._mode = None          # last logged mode, so we log only transitions
+        self._cooldown_until = 0.0
+
+    def _spawn(self):
+        self._proc = subprocess.Popen(
+            _PY_PREFIX + [_HELPER_WSL_PATH],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            encoding="utf-8", errors="replace", bufsize=1,
+        )
+
+    def _kill(self):
+        if self._proc is not None:
+            try:
+                self._proc.kill()
+            except Exception:
+                pass
+            self._proc = None
+
+    def _transact(self, cmds):
+        """One request/response. Raises on any pipe or protocol trouble."""
+        if self._proc is None or self._proc.poll() is not None:
+            self._spawn()
+        self._seq += 1
+        req_id = self._seq
+        self._proc.stdin.write(json.dumps({"id": req_id, "cmds": cmds}) + "\n")
+        self._proc.stdin.flush()
+        line = self._proc.stdout.readline()
+        if not line:
+            raise IOError("helper closed the pipe")
+        resp = json.loads(line)
+        if resp.get("id") != req_id:
+            # Reply out of step with the request — the stream is desynced and
+            # every later read would be off by one. Restart rather than guess.
+            raise IOError(f"helper id {resp.get('id')} != {req_id}")
+        if resp.get("error"):
+            raise IOError(resp["error"])
+        return resp.get("results") or []
+
+    def run(self, cmds):
+        """Run argv lists in one round trip. Returns results, or None to fall back."""
+        if time.time() < self._cooldown_until:
+            return None
+        with self._lock:
+            for attempt in (1, 2):  # one free retry, to respawn a dead helper
+                try:
+                    results = self._transact(cmds)
+                    if self._mode != "helper":
+                        logging.info("TMUX via persistent helper (~2ms/call)")
+                        self._mode = "helper"
+                    return results
+                except Exception as e:
+                    self._kill()
+                    if attempt == 2:
+                        self._cooldown_until = time.time() + _HELPER_COOLDOWN
+                        if self._mode != "fallback":
+                            logging.warning(
+                                f"TMUX helper unavailable ({e}) — falling back "
+                                f"to `wsl -e tmux` (~130ms/call)")
+                            self._mode = "fallback"
+        return None
+
+
+_TMUX = _TmuxChannel()
+
+
+def _tmux_run(*args):
+    """Run one tmux command via the helper, falling back to a `wsl -e tmux` spawn."""
+    results = _TMUX.run([list(args)])
+    if results is not None and results:
+        r = results[0]
+        return _TmuxResult(r.get("rc", -1), r.get("out", ""), r.get("err", ""))
+    p = subprocess.run(_tmux_cmd(*args), capture_output=True, timeout=15,
+                       encoding="utf-8", errors="replace")
+    return _TmuxResult(p.returncode, p.stdout or "", p.stderr or "")
+
+
+def _tmux_literal(text):
+    """Escape user text destined for a tmux argv (send-keys -l, set-buffer).
+
+    tmux's lexer strips an unescaped trailing ';' off a word and treats it as a
+    command separator, so "ls -la;" arrives as "ls -la" — the semicolon is
+    silently swallowed. Escaping it as "\\;" makes tmux deliver it literally.
+
+    Pre-existing: the old `wsl -e tmux` path lost it in exactly the same way,
+    which is why this sits above both the helper and the fallback.
+    """
+    if text.endswith(";"):
+        return text[:-1] + "\\;"
+    return text
+
+
+def _tmux_run_many(*cmds):
+    """Run several tmux commands in ONE round trip. Returns a result per command."""
+    results = _TMUX.run([list(c) for c in cmds])
+    if results is not None and len(results) == len(cmds):
+        return [_TmuxResult(r.get("rc", -1), r.get("out", ""), r.get("err", ""))
+                for r in results]
+    return [_tmux_run(*c) for c in cmds]
+
+
 # File logger — rotating so spark.log can never balloon again (it hit 33MB
 # from per-pageload beacons). 2MB cap + one backup is plenty for debugging.
 from logging.handlers import RotatingFileHandler
@@ -311,19 +445,13 @@ def send_to_claude(text, session_id=None):
     cmd = text.strip().lower().rstrip(".")
     key = VOICE_COMMANDS.get(cmd)
     if key:
-        result = subprocess.run(
-            _tmux_cmd("send-keys", "-t", tmux, *key.split()),
-            capture_output=True, timeout=15,
-        )
+        result = _tmux_run("send-keys", "-t", tmux, *key.split())
         logging.info(f"KEY cmd='{cmd}' session={tmux} rc={result.returncode}")
     else:
-        result = subprocess.run(
-            _tmux_cmd("send-keys", "-t", tmux, "-l", "--", text),
-            capture_output=True, timeout=15,
-        )
-        subprocess.run(
-            _tmux_cmd("send-keys", "-t", tmux, "Enter"),
-            capture_output=True, timeout=15,
+        # Text and Enter in ONE round trip — this was two separate spawns.
+        _tmux_run_many(
+            ["send-keys", "-t", tmux, "-l", "--", _tmux_literal(text)],
+            ["send-keys", "-t", tmux, "Enter"],
         )
         logging.info(f"SEND text='{text[:80]}' session={tmux}")
 
@@ -381,12 +509,9 @@ fetch('/api/log',{method:'POST',headers:{'Content-Type':'application/json'},body
 def _pane_info():
     """Return {tmux_session: {"cmd": ..., "path": ...}} for all sessions."""
     try:
-        result = subprocess.run(
-            _tmux_cmd("list-panes", "-a", "-F",
-             "#{session_name}\t#{pane_current_command}\t#{pane_current_path}"),
-            capture_output=True, timeout=10,
-            encoding="utf-8", errors="replace",
-        )
+        result = _tmux_run(
+            "list-panes", "-a", "-F",
+            "#{session_name}\t#{pane_current_command}\t#{pane_current_path}")
         if result.returncode != 0:
             return {}
         out = {}
@@ -464,13 +589,11 @@ def launch_session():
     for s in SESSIONS:
         if s["id"] == sid:
             tmux = s["tmux"]
-            subprocess.run(_tmux_cmd("respawn-pane", "-k", "-t", tmux),
-                           capture_output=True, timeout=15)
-            time.sleep(0.5)
+            _tmux_run("respawn-pane", "-k", "-t", tmux)
+            time.sleep(0.5)  # let the fresh shell come up before typing into it
             work_dir = "/mnt/c/dev"
-            subprocess.run(_tmux_cmd("send-keys", "-t", tmux,
-                            f"cd {work_dir} && {cmd}", "Enter"),
-                           capture_output=True, timeout=15)
+            _tmux_run("send-keys", "-t", tmux,
+                      f"cd {work_dir} && {cmd}", "Enter")
             logging.info(f"LAUNCH {cli} in {tmux} ({cmd})")
             return jsonify({"ok": True, "cmd": cmd})
     return jsonify({"error": "Unknown session"}), 400
@@ -528,10 +651,7 @@ def key():
     if k not in ALLOWED_KEYS:
         return jsonify({"error": "Key not allowed"}), 400
     tmux = _resolve_session(data)
-    result = subprocess.run(
-        _tmux_cmd("send-keys", "-t", tmux, k),
-        capture_output=True, timeout=15,
-    )
+    result = _tmux_run("send-keys", "-t", tmux, k)
     if result.returncode != 0:
         return jsonify({"error": f"tmux failed (rc={result.returncode})"}), 500
     return jsonify({"ok": True, "session": tmux})
@@ -545,10 +665,7 @@ def type_char():
     if not text:
         return jsonify({"error": "No text"}), 400
     tmux = _resolve_session(data)
-    subprocess.run(
-        _tmux_cmd("send-keys", "-t", tmux, "-l", "--", text),
-        capture_output=True, timeout=15,
-    )
+    _tmux_run("send-keys", "-t", tmux, "-l", "--", _tmux_literal(text))
     return jsonify({"ok": True})
 
 
@@ -566,31 +683,28 @@ def scroll():
     #    lives in tmux, so a PageUp keystroke goes nowhere — drive tmux copy-mode.
     # Detect per-call because a tab can flip between the two (e.g. Bravo was in the
     # normal buffer while the others were alt-screen, which knocked out its PageUp).
-    alt = subprocess.run(
-        _tmux_cmd("display-message", "-p", "-t", tmux, "#{alternate_on}"),
-        capture_output=True, timeout=15, encoding="utf-8", errors="replace",
-    ).stdout.strip()
+    alt = _tmux_run("display-message", "-p", "-t", tmux,
+                    "#{alternate_on}").stdout.strip()
 
     if alt == "1":
         if direction == "up":
-            subprocess.run(_tmux_cmd("send-keys", "-t", tmux, "PageUp"),
-                           capture_output=True, timeout=15)
+            _tmux_run("send-keys", "-t", tmux, "PageUp")
         else:
             # down = a single page, symmetric with PageUp. Reaching the bottom
             # returns to the live input; typing also auto-snaps there.
-            subprocess.run(_tmux_cmd("send-keys", "-t", tmux, "PageDown"),
-                           capture_output=True, timeout=15)
+            _tmux_run("send-keys", "-t", tmux, "PageDown")
     else:
         if direction == "up":
-            # -e = auto-exit copy-mode when scrolled back to the bottom
-            subprocess.run(_tmux_cmd("copy-mode", "-e", "-t", tmux),
-                           capture_output=True, timeout=15)
-            subprocess.run(_tmux_cmd("send-keys", "-X", "-t", tmux, "page-up"),
-                           capture_output=True, timeout=15)
+            # -e = auto-exit copy-mode when scrolled back to the bottom.
+            # Both commands are ours (no user text), so batching them into one
+            # round trip is safe — nothing here can be mistaken for a separator.
+            _tmux_run_many(
+                ["copy-mode", "-e", "-t", tmux],
+                ["send-keys", "-X", "-t", tmux, "page-up"],
+            )
         else:
             # page-down inside copy-mode; a no-op (and stays live) if not scrolled
-            subprocess.run(_tmux_cmd("send-keys", "-X", "-t", tmux, "page-down"),
-                           capture_output=True, timeout=15)
+            _tmux_run("send-keys", "-X", "-t", tmux, "page-down")
     return jsonify({"ok": True})
 
 
@@ -598,11 +712,7 @@ def scroll():
 def screenshot():
     data = request.get_json() or {}
     tmux = _resolve_session(data)
-    result = subprocess.run(
-        _tmux_cmd("capture-pane", "-t", tmux, "-p"),
-        capture_output=True, timeout=15,
-        encoding="utf-8", errors="replace",
-    )
+    result = _tmux_run("capture-pane", "-t", tmux, "-p")
     text = (result.stdout or "").rstrip()
     return jsonify({"ok": True, "text": text})
 
@@ -612,11 +722,7 @@ def screenshot_save():
     """Capture visible pane and save to C:/dev/."""
     data = request.get_json() or {}
     tmux = _resolve_session(data)
-    result = subprocess.run(
-        _tmux_cmd("capture-pane", "-t", tmux, "-p"),
-        capture_output=True, timeout=15,
-        encoding="utf-8", errors="replace",
-    )
+    result = _tmux_run("capture-pane", "-t", tmux, "-p")
     text = (result.stdout or "").rstrip()
     if not text:
         return jsonify({"ok": False, "error": "Empty capture"}), 400
@@ -667,11 +773,7 @@ def _turn_to_text(turn):
 def _capture_scrollback(lines=200, session_id=None):
     """Capture last N lines of scrollback from given (or active) tmux session."""
     tmux = _resolve_session({"session": session_id} if session_id else {})
-    result = subprocess.run(
-        _tmux_cmd("capture-pane", "-t", tmux, "-p", "-S", f"-{lines}"),
-        capture_output=True, timeout=15,
-        encoding="utf-8", errors="replace",
-    )
+    result = _tmux_run("capture-pane", "-t", tmux, "-p", "-S", f"-{lines}")
     return (result.stdout or "").strip()
 
 
@@ -885,14 +987,12 @@ def paste_text():
     global _last_text
     _last_text = text
     tmux = _resolve_session(data)
-    # Load text into tmux paste buffer, then paste it — no length limit
-    subprocess.run(
-        _tmux_cmd("set-buffer", "--", text),
-        capture_output=True, timeout=15,
-    )
-    subprocess.run(
-        _tmux_cmd("paste-buffer", "-t", tmux),
-        capture_output=True, timeout=15,
+    # Load text into tmux paste buffer, then paste it — no length limit.
+    # Both in one round trip; the buffer must be set before the paste, and the
+    # helper runs a batch strictly in order.
+    _tmux_run_many(
+        ["set-buffer", "--", _tmux_literal(text)],
+        ["paste-buffer", "-t", tmux],
     )
     logging.info(f"PASTE text='{text[:80]}' ({len(text)} chars) session={tmux} (no enter)")
     return jsonify({"ok": True, "input": text})

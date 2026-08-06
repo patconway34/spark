@@ -366,10 +366,30 @@ document.addEventListener('DOMContentLoaded', () => {
 let _lastMicKey = 0;
 const MIC_DOUBLE_TAP_MS = 400;
 
-// --- Key debugger (temporary) ---
-let _debugMode = false;
+// --- Key debugger ---
+// Load Spark with ?keys=1 to turn it on. Every keypress is then captured,
+// echoed to the status line AND logged to spark.log as "KEY: ...", and nothing
+// else fires — no mic, no Enter, no session switch. That is deliberate: it is
+// how you find out what a controller button ACTUALLY sends.
+//
+// The device's own 8BitDo profile is the only source of truth. The screenshots
+// in "Button Map and Procedure" go stale (there are three of them, from three
+// different dates, mapping the same buttons to different keys), and Android
+// silently drops anything above F12 as "Unidentified". Probe, don't guess.
+//
+// Reload without ?keys=1 to turn it back off.
+// Server flag wins (see _KEYDEBUG_FLAG in app.py) because the phone opens Spark
+// from a home-screen PWA shortcut with a fixed URL, where ?keys=1 never
+// survives. The query param is kept for desktop.
+let _debugMode = {{ 'true' if key_debug else 'false' }}
+                 || new URLSearchParams(location.search).has('keys');
 let _debugKeys = [];
 let _debugTimer = null;
+if (_debugMode) {
+    // NOT window 'load' — that waits on the three ttyd iframes and can be many
+    // seconds late (or never), so the banner would never appear.
+    setTimeout(() => setStatus('KEY DEBUG ON — press buttons, nothing else will fire'), 0);
+}
 document.addEventListener('keydown', (e) => {
     if (_debugMode) {
         const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta'].filter(Boolean).join('+');

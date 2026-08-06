@@ -330,13 +330,21 @@ def send_to_claude(text, session_id=None):
 
 # --- Main routes ---
 
+# Key-debug flag. Spark is normally opened from the phone's home-screen icon,
+# which is a PWA shortcut with a fixed URL — so a ?keys=1 query param never
+# survives. Touch this file instead and the next page load comes up in key
+# debug mode; delete it to go back to normal.
+_KEYDEBUG_FLAG = _SPARK_DIR / ".keydebug"
+
+
 @app.route("/")
 def home():
     _apply_terminal_names()
     _apply_terminal_colors()
     active = get_session()
     resp = make_response(render_template("chat.html",
-        session=active, sessions=SESSIONS, theme_ui=_theme_ui_for_template()))
+        session=active, sessions=SESSIONS, theme_ui=_theme_ui_for_template(),
+        key_debug=_KEYDEBUG_FLAG.exists()))
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp
 

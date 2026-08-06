@@ -5,7 +5,11 @@ button is set, in the **8BitDo Ultimate** app, to send a keyboard key (an F-key 
 Shift+F-key). Spark's page (`templates/chat.html`) listens for those keys in its
 `keydown` handler and runs the matching action.
 
-Reference image: `profile_2_map.jpg` (source of truth for what each button sends).
+Reference image: `profile_2_map.jpg` (2026-07-19) — the only map kept. Three
+conflicting screenshots used to sit in the repo, from three different dates,
+mapping the same buttons to different keys; the stale two were deleted
+2026-08-06 (recoverable from git). Treat even this one as a hint, not truth —
+run the key debug probe below before trusting any of it.
 
 ---
 
@@ -75,20 +79,63 @@ clean `Shift+F-key` so every physical button has its own action.
    `if (e.key === 'F6') { e.preventDefault(); listenMe(); return; }`
 4. **Restart Spark** (via Radar, port 5023) and hard-refresh the phone.
 
-## Procedure — to discover what a button actually sends (debug probe)
+## Procedure — to discover what a button actually sends (key debug mode)
 
-If a mapping is ever unclear, temporarily re-add this line at the top of the
-`keydown` handler in `chat.html` (right after the type-bar skip), restart Spark,
-hard-refresh the phone, press the button, then read `spark.log` for `BTNMAP`:
+**Always probe before believing this document.** The map above is a photo of the
+past; the controller is the truth, and the two drift (see below).
 
-```js
-if (/^F\d+$/.test(e.key) || e.key === 'Unidentified') {
-    fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({msg:'BTNMAP key='+e.key+' code='+e.code+' keyCode='+e.keyCode})}).catch(()=>{});
-}
-```
+Turn it on:
 
-Remove it once you have the answer (it's noise otherwise).
+- **Phone:** create the file `C:\dev\spark\.keydebug`, then reload Spark. No
+  restart needed — the flag is read on every page load. The phone opens Spark
+  from a home-screen PWA shortcut with a fixed URL, which is why a `?keys=1`
+  query param does **not** work there.
+- **Desktop:** load Spark with `?keys=1`.
+
+You'll see `KEY DEBUG ON` in the status line. Every press is echoed on screen
+and logged to `spark.log` as `KEY: F9 [F9 #120]`, and **nothing else fires** —
+no mic, no Enter, no session switch. Delete `.keydebug` (or reload without the
+param) to turn it off.
+
+A button that sends **nothing at all** — no key, not even `Unidentified` — is
+not reaching the browser. That means the device is sending a key Android eats
+outright (media/volume keys are swallowed before any web page sees them), or
+the button is unassigned or failing. It is never a Spark-side problem: the
+probe runs before any Spark logic and before any network call.
+
+---
+
+## Probe results — 2026-08-06
+
+Measured, not assumed:
+
+| Button | Actually sends | Code does | Verdict |
+|---|---|---|---|
+| ← | `F1` | mic | ✅ correct |
+| → | `F2` | Enter | ✅ correct |
+| L | `F4` | Escape | ✅ correct |
+| L2 | `F8` | Backspace | ✅ correct |
+| ↑ | `F9` | next session | ✅ correct |
+| **↓** | **nothing** | prev session | ❌ **not reaching the browser** |
+| **★** | **`Shift+F5`** | `Shift+F5` = Tab | ⚠️ doc claimed `Shift+F1` = `/new` |
+
+**↓ sends no event at all.** Reassign it in the 8BitDo Ultimate app (check what
+it is bound to *now* — do not trust the screenshot) and Sync to device.
+
+**The ⏳ rows above were never done.** Per `profile_2_map.jpg`, those buttons
+still send their old keys, and they are duplicates or dead:
+
+| Button | Doc wanted | Really sends | Effect |
+|---|---|---|---|
+| Y | `Shift+F8` Listen | `F8` | Backspace (same as L2) |
+| B | `Shift+F3` Play/Pause | `F7` | prev session (same as ↓) |
+| X | `Shift+F4` Summary | `F13` | dead — Android drops >F12 |
+| R | `Shift+F5` Tab | `F15` | dead |
+| R2 | `Shift+F7` Copy screen | `F16` | dead |
+
+So the audio buttons have never worked — not a regression. Either finish the
+8BitDo app pass, or bend the code in `chat.html` to what the buttons already
+send.
 
 ---
 

@@ -36,12 +36,16 @@ app.secret_key = os.getenv("SPARK_SECRET_KEY") or hashlib.sha256(
 ).hexdigest()
 
 # --- Auth ---
-# Spark is publicly tunneled (spark.tradingdata.net) and its API injects
-# keystrokes into live terminals. Every request must carry SPARK_TOKEN,
-# either as ?token=... (first visit — sets a cookie), the cookie, or an
-# X-Spark-Token header.
+# Spark is reachable from the public internet through a Cloudflare tunnel, and
+# its API injects keystrokes into live terminals. Every request must carry
+# SPARK_TOKEN, either as ?token=... (first visit — sets a cookie), the cookie,
+# or an X-Spark-Token header.
 
 SPARK_TOKEN = os.getenv("SPARK_TOKEN", "")
+
+# The hostname the tunnel serves Spark on. Config, not a secret — but it is
+# deployment-specific, so it lives in .env rather than in the source.
+PUBLIC_HOST = os.getenv("SPARK_PUBLIC_HOST", "")
 
 
 def _token_ok():
@@ -1073,7 +1077,8 @@ if __name__ == "__main__":
     if not os.environ.get("WERKZEUG_RUN_MAIN"):
         _kill_port(PORT)
     if not SPARK_TOKEN:
-        print("[Spark] WARNING: SPARK_TOKEN not set in .env — API is UNPROTECTED "
-              "and spark.tradingdata.net is public!")
+        where = PUBLIC_HOST or "the tunnel hostname"
+        print(f"[Spark] WARNING: SPARK_TOKEN not set in .env — API is "
+              f"UNPROTECTED and {where} is public!")
     print(f"[Spark] Voice layer on port {PORT}")
     app.run(host=HOST, port=PORT, debug=False)

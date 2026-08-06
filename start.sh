@@ -12,8 +12,8 @@ MODELS=("claude-opus-5" "claude-opus-5" "claude-opus-5")
 WORK_DIR="/mnt/c/dev"
 
 # Auth model (2026-07-18): terminals are served same-origin under
-# spark.tradingdata.net/term/<session> and protected by Cloudflare Access on
-# that hostname (plus the Spark token). ttyd carries NO HTTP Basic Auth: a
+# <spark-host>/term/<session> and protected by Cloudflare Access on that
+# hostname (plus the Spark token). ttyd carries NO HTTP Basic Auth: a
 # same-origin iframe's Basic-Auth challenge is silently blocked by mobile
 # Chrome, which rendered the terminals as a blank white page on the phone.
 # ttyd binds 0.0.0.0 and is only reachable via the Windows cloudflared tunnel

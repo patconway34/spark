@@ -21,3 +21,9 @@ detection.jsonl
 _listen_*.mp3
 _scrollback_*.txt
 listen_log.txt
+
+# Python virtualenvs — local to each developer, never shared
+.venv/
+venv/
+env/
+.pytest_cache/

@@ -3,7 +3,7 @@
 # Hot-reloaded: edit this file and refresh the page (no restart needed).
 1=red
 2=manna
-3=marina
+3=new
 4=plato
 5=compass
 6=orbit

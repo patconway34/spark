@@ -54,7 +54,9 @@
   "terminals": [
     { "color": "#d23b3b", "background": "#f7dede" },
     { "color": "#3f9d4f", "background": "#dff0e2" },
-    { "color": "#3564c0", "background": "#dde8f7" }
+    { "color": "#3564c0", "background": "#dde8f7" },
+    { "color": "#c17d1a", "background": "#f7eeda" },
+    { "color": "#8148b5", "background": "#ece1f7" }
   ],
 
   "ui": {

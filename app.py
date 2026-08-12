@@ -325,11 +325,15 @@ def _load_terminals():
     return terms
 
 
-# Three terminals (2026-08-02): one swipe each way reaches the other two, and all
-# three stay loaded so switching is instant. tmux spark4-15 may still be running
-# in the background (their Claude sessions), just not surfaced here.
-_TERMINAL_COUNT = 3
-_TAB_MODELS = ["opus"] * _TERMINAL_COUNT
+# Five terminals (2026-08-12, up from three). Adding tabs does NOT add loaded
+# iframes: chat.html keeps only the MAX_LOADED (3) most recent live and blanks
+# the rest, which is what bounds mobile-renderer memory — see
+# gotchas/mobile-renderer-memory.md before raising that cap.
+# Reach is fine at five because ↑ walks back most-recently-used, not by index.
+# tmux spark6-15 may still be running in the background, just not surfaced here.
+# Ports are 7681+n, and cloudflare/config.yml already routes /term/spark1-15.
+_TERMINAL_COUNT = 5
+_TAB_MODELS = ["fable"] * _TERMINAL_COUNT
 _INITIAL_TERMINALS = _load_terminals()
 SESSIONS = [
     {"id": str(n), "name": str(n), "tmux": f"spark{n}", "ttyd_port": 7681 + n,

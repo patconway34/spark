@@ -1,14 +1,16 @@
 #!/bin/bash
-# Spark — start tmux sessions + ttyd terminals (3 numbered sessions)
+# Spark — start tmux sessions + ttyd terminals (5 numbered sessions)
 #
-# Tab N = sparkN on port 7681+N. Models: all opus 5. Three terminals so one
-# swipe each way reaches the other two and all three stay loaded (instant switch).
+# Tab N = sparkN on port 7681+N. Models: all fable 5. Five terminals; the page
+# keeps only the 3 most-recently-viewed iframes live (chat.html MAX_LOADED), so
+# tab count does not drive phone memory. ↑ walks back most-recently-used.
 # A NEW tmux session auto-launches claude with its tab's model; existing
-# sessions are never touched (running conversations survive restarts).
+# sessions are never touched (running conversations survive restarts) — so
+# changing MODELS here only affects sessions that do not exist yet.
 
-SESSIONS=("spark1" "spark2" "spark3")
-PORTS=(7682 7683 7684)
-MODELS=("claude-opus-5" "claude-opus-5" "claude-opus-5")
+SESSIONS=("spark1" "spark2" "spark3" "spark4" "spark5")
+PORTS=(7682 7683 7684 7685 7686)
+MODELS=("claude-fable-5" "claude-fable-5" "claude-fable-5" "claude-fable-5" "claude-fable-5")
 WORK_DIR="/mnt/c/dev"
 
 # Auth model (2026-07-18): terminals are served same-origin under
@@ -79,7 +81,7 @@ if [ ${#THEMES[@]} -lt "$N" ]; then
     echo "  (theme.json unreadable — using default Gruvbox Light for all $N)"
     THEMES=(); for _i in $(seq 1 "$N"); do THEMES+=("$DEFAULT_THEME"); done
 fi
-LABELS=("1" "2" "3")
+LABELS=("1" "2" "3" "4" "5")
 
 echo "Launching ttyd terminals..."
 for i in "${!SESSIONS[@]}"; do

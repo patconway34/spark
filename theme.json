@@ -56,7 +56,9 @@
     { "color": "#3f9d4f", "background": "#dff0e2" },
     { "color": "#3564c0", "background": "#dde8f7" },
     { "color": "#c17d1a", "background": "#f7eeda" },
-    { "color": "#8148b5", "background": "#ece1f7" }
+    { "color": "#8148b5", "background": "#ece1f7" },
+    { "color": "#1f9e8f", "background": "#daf0ec" },
+    { "color": "#c2457e", "background": "#f7dfeb" }
   ],
 
   "ui": {

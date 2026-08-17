@@ -5,8 +5,8 @@ Called by app.py via subprocess under Windows Python.
 Usage:
     python notify.py text <scrollback_file>     # summarize + SMS to patrick
     python notify.py play <scrollback_file>     # Alan Watts voice + Telegram
-    python notify.py speak <scrollback_file>    # gTTS mp3 for in-browser playback
-    python notify.py listen <scrollback_file>   # API summary of LAST response only + gTTS mp3
+    python notify.py speak <scrollback_file>    # TTS mp3 for in-browser playback
+    python notify.py listen <scrollback_file>   # API summary of LAST response only + TTS mp3
 
 Auth split (intentional): `text`/`play`/`speak` go through mente = Claude
 subscription. `listen` is the ONLY path that uses Patrick's own Claude API
@@ -157,6 +157,56 @@ def _log_listen(input_text, summary):
         print(f"LISTEN_LOG_FAILED ({e})")
 
 
+# --- Text to speech ---------------------------------------------------------
+# Two engines, tried in order, because a single free provider is a single point
+# of failure. gTTS is Google Translate's anonymous speech endpoint: free, no
+# key, and throttled by IP with a 429 once it sees volume. On 2026-08-17 a held
+# controller button pushed 356 calls through it and Google cut us off for
+# hours — every summary generated and billed fine, then died at the audio step,
+# so nothing played and it looked like the API had run out.
+#
+# edge-tts is Microsoft's equivalent: also free, also no key, different host.
+# One provider throttling can no longer take the feature down. Both write mp3,
+# so the browser side is unchanged either way.
+TTS_VOICE = "en-US-AriaNeural"  # edge-tts; `edge-tts --list-voices` for others
+
+
+def _tts(text, mp3_path):
+    """Write `text` to `mp3_path` as mp3. Returns the engine that succeeded.
+
+    Raises only if EVERY engine fails — callers treat that as a real failure.
+    """
+    errors = []
+
+    try:
+        from gtts import gTTS
+        gTTS(text=text, lang="en", slow=False).save(str(mp3_path))
+        if mp3_path.exists() and mp3_path.stat().st_size > 0:
+            return "gtts"
+        errors.append("gtts: wrote an empty file")
+    except Exception as e:
+        errors.append(f"gtts: {type(e).__name__}: {str(e)[:120]}")
+
+    try:
+        import asyncio
+        import edge_tts
+
+        async def _go():
+            await edge_tts.Communicate(text, TTS_VOICE).save(str(mp3_path))
+
+        asyncio.run(_go())
+        if mp3_path.exists() and mp3_path.stat().st_size > 0:
+            # Printed, not raised — the audio is fine, but it is worth knowing
+            # from spark.log that the primary engine is down.
+            print(f"TTS_FALLBACK: used edge-tts because {errors[0]}")
+            return "edge-tts"
+        errors.append("edge-tts: wrote an empty file")
+    except Exception as e:
+        errors.append(f"edge-tts: {type(e).__name__}: {str(e)[:120]}")
+
+    raise RuntimeError("all TTS engines failed — " + " | ".join(errors))
+
+
 def main():
     mode = sys.argv[1]
     input_file = Path(sys.argv[2])
@@ -191,22 +241,21 @@ def main():
         print(f"Audio sent: {story_path.name}")
 
     elif mode == "speak":
-        # Free/fast path: summarize + gTTS mp3, returned to the browser.
+        # Free/fast path: summarize + TTS mp3, returned to the browser.
         # Prints "MP3:<path>" on the last line for app.py to pick up.
         try:
             summary = summarize_for_voice(text)
         except Exception as e:
             summary = "Here's what happened in the terminal. " + text.strip()[-800:]
             print(f"SUMMARIZE_FAILED ({e}), using raw")
-        from gtts import gTTS
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         mp3_path = Path(f"C:/dev/spark/_listen_{ts}.mp3")
-        gTTS(text=summary, lang="en", slow=False).save(str(mp3_path))
+        _tts(summary, mp3_path)
         print(f"MP3:{mp3_path}")
 
     elif mode == "listen":
         # Listen button: API summary of ONLY what's below Patrick's last input,
-        # cleaned of terminal chrome, then gTTS mp3 for in-browser playback.
+        # cleaned of terminal chrome, then TTS mp3 for in-browser playback.
         # Prints "MP3:<path>" on the last line for app.py to pick up.
         try:
             summary = summarize_last_response(text)
@@ -217,15 +266,14 @@ def main():
             summary = "Sorry, I couldn't summarize the terminal right now. Please try again."
             print(f"SUMMARIZE_FAILED ({e})")
         _log_listen(text, summary)
-        from gtts import gTTS
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         mp3_path = Path(f"C:/dev/spark/_listen_{ts}.mp3")
-        gTTS(text=summary, lang="en", slow=False).save(str(mp3_path))
+        _tts(summary, mp3_path)
         print(f"MP3:{mp3_path}")
 
     elif mode == "vsummary":
         # X button: 1-3 sentence SPOKEN summary (same gist as the Text button),
-        # then gTTS mp3 for in-browser playback. Prints "MP3:<path>".
+        # then TTS mp3 for in-browser playback. Prints "MP3:<path>".
         try:
             summary = summarize_short_voice(text)
             if not summary:
@@ -234,10 +282,9 @@ def main():
             summary = "Sorry, I couldn't summarize right now. Please try again."
             print(f"SUMMARIZE_FAILED ({e})")
         _log_listen(text, summary)
-        from gtts import gTTS
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         mp3_path = Path(f"C:/dev/spark/_listen_{ts}.mp3")
-        gTTS(text=summary, lang="en", slow=False).save(str(mp3_path))
+        _tts(summary, mp3_path)
         print(f"MP3:{mp3_path}")
 
 

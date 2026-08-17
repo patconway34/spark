@@ -325,14 +325,16 @@ def _load_terminals():
     return terms
 
 
-# Five terminals (2026-08-12, up from three). Adding tabs does NOT add loaded
+# Seven terminals (2026-08-17, up from five). Adding tabs does NOT add loaded
 # iframes: chat.html keeps only the MAX_LOADED (3) most recent live and blanks
 # the rest, which is what bounds mobile-renderer memory — see
 # gotchas/mobile-renderer-memory.md before raising that cap.
-# Reach is fine at five because ↑ walks back most-recently-used, not by index.
-# tmux spark6-15 may still be running in the background, just not surfaced here.
+# Reach is fine at seven because ↑ walks back most-recently-used, not by index.
+# The tab row stays ONE row at any count: #tab-bar is overflow-x:auto and
+# .tab-btn is flex:1, so tabs shrink and ellipsis their names rather than wrap.
+# tmux spark8-15 may still be running in the background, just not surfaced here.
 # Ports are 7681+n, and cloudflare/config.yml already routes /term/spark1-15.
-_TERMINAL_COUNT = 5
+_TERMINAL_COUNT = 7
 _TAB_MODELS = ["fable"] * _TERMINAL_COUNT
 _INITIAL_TERMINALS = _load_terminals()
 SESSIONS = [

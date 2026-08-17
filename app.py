@@ -890,6 +890,28 @@ def play_me():
 _audio_files = {}  # job_id -> mp3 path
 
 
+# --- Listen spend guard ---------------------------------------------------
+# Listen is the one path that bills: notify.py's `listen`/`vsummary` modes go
+# through Patrick's own Anthropic key, not mente's subscription. The controller
+# auto-repeats while a button is held, and on 2026-08-17 one hold fired 356
+# billed calls (~360k input tokens) in a day — against 43 on every other day
+# combined.
+#
+# The guard lives here, not in the browser, because auto-repeat fires ~10-26
+# times a SECOND: any client-side flag loses that race. Two rules:
+#   1. While a job is running for this (session, mode), re-requests return it.
+#   2. For a short cooldown after it starts, re-requests return it too — that
+#      catches the tail of a hold that lands just as a job completes.
+# Coalesced requests return ok + the existing job id, so a double-tap plays the
+# audio it already asked for instead of surfacing an error.
+#
+# NOT "a second press cancels the first": with auto-repeat that turns a held
+# button into hundreds of start/kill cycles, which is worse than the bug.
+_LISTEN_COOLDOWN = 5.0
+_listen_guard_lock = threading.Lock()
+_listen_recent = {}  # (session, mode) -> {"job": id, "started": ts}
+
+
 @app.route("/api/listen", methods=["POST"])
 def listen_me():
     """Capture scrollback, summarize ONLY the latest response (API path), TTS
@@ -902,6 +924,22 @@ def listen_me():
     mode = data.get("mode", "listen")
     if mode not in ("listen", "vsummary"):
         mode = "listen"
+
+    # Spend guard — must run BEFORE _retrieve_last_turn(), which spawns its own
+    # WSL process, and long before the billed call in notify.py.
+    guard_key = (sid or "_active", mode)
+    with _listen_guard_lock:
+        prev = _listen_recent.get(guard_key)
+        if prev:
+            age = time.time() - prev["started"]
+            running = _text_jobs.get(prev["job"]) == "pending"
+            if running or age < _LISTEN_COOLDOWN:
+                logging.info(
+                    f"LISTEN coalesced ({mode}) -> job={prev['job']} "
+                    f"age={age:.1f}s running={running} — no new API call")
+                return jsonify({"ok": True, "job": prev["job"],
+                                "coalesced": True})
+
     turn = _retrieve_last_turn(sid)
     if turn is None:
         # Engine crashed/timed out — fall back to the old screen scrape so Listen
@@ -924,6 +962,8 @@ def listen_me():
 
     job_id = str(uuid.uuid4())[:8]
     _text_jobs[job_id] = "pending"
+    with _listen_guard_lock:
+        _listen_recent[guard_key] = {"job": job_id, "started": time.time()}
 
     def _do():
         try:

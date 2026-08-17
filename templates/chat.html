@@ -413,29 +413,27 @@ document.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.code === 'KeyM') { e.preventDefault(); toggleMic(); return; }
 
     // --- 8BitDo Profile 2, shifted layer (Shift+F-key combos) ---
-    // The 6 formerly-duplicate/dead buttons (A,B,X,R,R2) live here on clean
-    // Shift+F-keys so every physical button has a unique action. ❖ stays
-    // unbound (it's the power-off button). See "Button Map and Procedure".
+    // Original (pre-flip) hold restored 2026-08-08. D-pad ↓ (F7) is dead
+    // hardware — its old prev-session job is gone; ↑ jumps to the last-used
+    // terminal instead of cycling. See "Button Map and Procedure".
     if (e.shiftKey && e.key === 'F1') { e.preventDefault(); sendCommand('/new'); setStatus('/new'); return; }   // P2 ★  — /new
-    if (e.shiftKey && e.key === 'F8') { e.preventDefault(); listenMe(); return; }                              // P2 Y  — Listen (fresh read)
     if (e.shiftKey && e.key === 'F2') { e.preventDefault(); textMe(); return; }                                // P2 A  — Text me (SMS)
     if (e.shiftKey && e.key === 'F3') { e.preventDefault(); listenPlayPause(); return; }                       // P2 B  — Play/Pause read-back
-    if (e.shiftKey && e.key === 'F4') { e.preventDefault(); summaryMe(); return; }                             // P2 X  — Summary read (1-3 sentences, voice)
+    if (e.shiftKey && e.key === 'F4') { e.preventDefault(); summaryMe(); return; }                             // P2 X  — Summary read
     if (e.shiftKey && e.key === 'F5') { e.preventDefault(); sendKey('Tab'); return; }                          // P2 R  — Tab
     if (e.shiftKey && e.key === 'F7') { e.preventDefault(); copyScreen(); return; }                            // P2 R2 — Copy screen
+    if (e.shiftKey && e.key === 'F8') { e.preventDefault(); listenMe(); return; }                              // P2 Y  — Listen (fresh read)
 
     // --- 8BitDo Profile 2 (Android only delivers F1-F12; F13+ = Unidentified) ---
-    // F3/F5/F6/F11 skipped — Chrome uses them (find/reload/omnibox/fullscreen).
     if (e.shiftKey || e.ctrlKey || e.altKey) return;  // base layer = unmodified keys only
-    // Rotated-90° hold (2026-07-14): d-pad actions shifted one step, +/− swapped
-    if (e.key === 'F9') { e.preventDefault(); switchSessionByOffset(1); return; }  // P2 D-pad Up — next session
-    if (e.key === 'F7') { e.preventDefault(); switchSessionByOffset(-1); return; } // P2 D-pad Down — prev session
     if (e.key === 'F1') { e.preventDefault(); toggleMic(); return; }               // P2 D-pad Left — mic
     if (e.key === 'F2') { e.preventDefault(); pressEnter(); return; }              // P2 D-pad Right — Enter
-    if (e.key === 'F4') { e.preventDefault(); sendKey('Escape'); return; }         // P2 L — clear
-    if (e.key === 'F8') { e.preventDefault(); sendKey('BSpace'); return; }         // P2 L2 — backspace
-    if (e.key === 'F12') { e.preventDefault(); scrollTerminal('up'); return; }     // P2 "−" — page up
+    if (e.key === 'F9') { e.preventDefault(); switchToLastSession(); return; }     // P2 D-pad Up — back through recent terminals (chain within 3s)
+    // F7 (D-pad Down) unbound — broken micro switch, never fires
+    if (e.key === 'F4') { e.preventDefault(); sendKey('Escape'); return; }         // P2 L — Escape / clear
+    if (e.key === 'F8') { e.preventDefault(); sendKey('BSpace'); return; }         // P2 L2 — Backspace
     if (e.key === 'F10') { e.preventDefault(); scrollTerminal('down'); return; }   // P2 "+" — page down
+    if (e.key === 'F12') { e.preventDefault(); scrollTerminal('up'); return; }     // P2 "−" — page up
 
     // --- Send ---
     if (e.key === 'Enter' && !e.ctrlKey) { e.preventDefault(); pressEnter(); return; }  // 8BitDo B
@@ -554,7 +552,21 @@ function listenMe() { _startListen('listen', '🎧'); }
 // X button: 1-3 sentence spoken summary of the same reply.
 function summaryMe() { _startListen('vsummary', '📝'); }
 
+// Listen costs real money (notify.py's listen/vsummary run on the Anthropic
+// API key, not the subscription), and a HELD controller button auto-repeats
+// ~10-26x/second. Same shape as the scroll throttle above: one deliberate
+// press gets through, auto-repeat inside the window is dropped. The server
+// enforces this too (_LISTEN_COOLDOWN) — this half just spares the round trip.
+let _lastListen = 0;
+const LISTEN_THROTTLE_MS = 1500;
+
 function _startListen(mode, icon) {
+    const now = Date.now();
+    if (now - _lastListen < LISTEN_THROTTLE_MS) {
+        setStatus('Already working on it...');
+        return;
+    }
+    _lastListen = now;
     // ALWAYS start a brand-new read-back. Never replay or toggle —
     // that's what listenPlayPause() (B button) is for. Both modes share the
     // same _listenPlayer, so B pauses/resumes whichever one is playing.
@@ -708,12 +720,40 @@ function applyTheme(id) {
 }
 
 // --- Tab navigation helpers ---
-let _lastSession = null;
+// ↑ walks back through terminals in most-recently-used order. Presses within
+// NAV_CHAIN_MS chain deeper (1 press = previous, 2 = two back, ...); when the
+// window lapses the chain commits as ONE move, so terminals flashed through
+// mid-chain don't pollute the recency order. Taps/swipes break any open chain.
+const NAV_CHAIN_MS = 3000;
+let _mru = [ACTIVE_SESSION];   // session ids, most recent first (current = [0])
+let _navChain = null;          // {list, idx} while an ↑-chain is open
+let _navChainTimer = null;
+
+function _mruTouch(id) {
+    const i = _mru.indexOf(id);
+    if (i >= 0) _mru.splice(i, 1);
+    _mru.unshift(id);
+}
 
 function switchToLastSession() {
-    if (_lastSession && _lastSession !== ACTIVE_SESSION) {
-        switchSession(_lastSession);
+    if (!_navChain) {
+        // Recency order first, never-visited terminals appended in tab order,
+        // current terminal pinned at [0] — ↑ can always reach everything.
+        const ids = _sessions.map(s => s.id);
+        const list = _mru.filter(id => ids.includes(id));
+        ids.forEach(id => { if (!list.includes(id)) list.push(id); });
+        const cur = list.indexOf(ACTIVE_SESSION);
+        if (cur > 0) { list.splice(cur, 1); list.unshift(ACTIVE_SESSION); }
+        if (list.length < 2) return;
+        _navChain = { list, idx: 0 };
     }
+    _navChain.idx = (_navChain.idx + 1) % _navChain.list.length;
+    clearTimeout(_navChainTimer);
+    _navChainTimer = setTimeout(() => {
+        _navChain = null;
+        _mruTouch(ACTIVE_SESSION);   // commit where the chain landed as one move
+    }, NAV_CHAIN_MS);
+    switchSession(_navChain.list[_navChain.idx], true);
 }
 
 function switchSessionByOffset(offset) {
@@ -731,9 +771,13 @@ function switchSessionByOffset(offset) {
 // explicit session id (see sendKey/sendCommand), so routing stays correct even
 // before the backend catches up. Previously this AWAITED the POST before showing
 // the terminal, which added a full round-trip of latency to every switch.
-function switchSession(id) {
+function switchSession(id, chained) {
     if (id === ACTIVE_SESSION) return;
-    _lastSession = ACTIVE_SESSION;
+    if (!chained) {   // direct switch (tap/swipe): breaks any ↑-chain, commits now
+        clearTimeout(_navChainTimer);
+        _navChain = null;
+        _mruTouch(id);
+    }
     ACTIVE_SESSION = id;
     document.querySelectorAll('.terminal-wrap').forEach(w => {
         w.classList.toggle('term-hidden', w.id !== 'wrap-' + id);

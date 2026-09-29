@@ -31,27 +31,32 @@ the key it always sent, only the action behind it changed.
 
 | Button | Sends | Action | | Button | Sends | Action |
 |---|---|---|---|---|---|---|
-| A | Shift+F2 | Mic on/off | | ← | F1 | Text summary (SMS) |
+| A | Shift+F2 | Mic on/off | | ← | F1 | Refresh the page |
 | Y | Shift+F8 | Enter / send | | → | F2 | Voice summary |
 | X | Shift+F4 | Terminal ← | | ↑ | F9 | Play / Pause read-back |
 | B | Shift+F3 | Terminal → | | ↓ | F7 | **dead switch — unbound** |
 | R | Shift+F5 | Escape | | L | F4 | Tab |
-| R2 | Shift+F7 | Clear screen (C-l) | | L2 | F8 | Big/Normal text toggle |
+| R2 | Shift+F7 | Clear typed line (C-u) | | L2 | F8 | Big/Normal text toggle |
 | ★ | Shift+F1 | /new (fresh conversation) | | + | F10 | Page up |
 | ❖ | F6 | unbound — leave (power) | | − | F12 | Page down |
 
 ### Notes
-- **Clear is the SCREEN, not the conversation.** R2 sends `C-l`: wipes the
-  visible scrollback, leaves the session intact. `/clear` and `/compact` stay
-  in the hamburger, where they need a deliberate tap — throwing away context
-  is too destructive for a thumb button.
-- **`C-l` had to be added to `ALLOWED_KEYS` in app.py.** The backend rejects
-  any key not on that list, so a new key binding is two edits, not one: the
-  `keydown` handler AND the allow-list. A missing allow-list entry looks
-  exactly like a dead button.
+- **Clear = `C-u`, the same as the hamburger's Clear button.** Shipped as
+  `C-l` (clear screen) first and that was wrong: the button people reach for
+  should do what the menu item they already know does. Wiping the typed line,
+  not the screen, not the conversation. `/clear` and `/compact` stay in the
+  hamburger where they need a deliberate tap.
+- **A new key still needs adding to `ALLOWED_KEYS` in app.py.** The backend
+  rejects any key not on that list, so a binding on a NEW key is two edits, not
+  one — and a missing allow-list entry looks exactly like a dead button.
+- **← is Refresh.** The phone runs Spark as a PWA with no address bar, so a hard
+  refresh meant closing and reopening the app. `/` is served no-store, so a
+  plain `location.reload()` fetches fresh code — that IS the hard refresh here.
+  It took the slot from the SMS summary, which stays in the hamburger (📲).
 - **↓ (F7) is dead hardware** — a broken micro switch, sends no event at all.
   Nothing can live there. The second summary went to ← instead.
-- **What lost its button:** Listen (fresh read 🎧) and Copy screen — both still
+- **What lost its button:** Listen (fresh read 🎧), Copy screen, and the SMS
+  summary (📲 Text) — all still
   in the hamburger. Play/Pause on ↑ covers playback.
 - **The 8BitDo app stays out of the loop.** Future changes are code-only edits
   in chat.html — never re-open the app unless a physical button needs a

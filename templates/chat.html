@@ -424,16 +424,16 @@ document.addEventListener('keydown', (e) => {
     if (e.shiftKey && e.key === 'F3') { e.preventDefault(); switchSessionByOffset(1); return; }                 // P2 B  — Terminal right
     if (e.shiftKey && e.key === 'F4') { e.preventDefault(); switchSessionByOffset(-1); return; }                // P2 X  — Terminal left
     if (e.shiftKey && e.key === 'F5') { e.preventDefault(); sendKey('Escape'); return; }                        // P2 R  — Escape
-    // CLEAR IS THE SCREEN, NOT THE CONVERSATION. Ctrl-L wipes the visible
-    // scrollback and leaves the session intact; /clear would throw away
-    // context, which is too destructive for a thumb button. /clear and
-    // /compact stay in the hamburger where they need a deliberate tap.
-    if (e.shiftKey && e.key === 'F7') { e.preventDefault(); sendKey('C-l'); return; }                           // P2 R2 — Clear screen
+    // CLEAR MEANS WHAT THE MENU'S CLEAR MEANS: C-u, wipe the line you have
+    // typed but not sent. Shipped as C-l (clear screen) first - wrong: Patrick
+    // reached for R2 expecting the hamburger's behaviour, which is the one he
+    // already knows. Same key as the menu button, so the two cannot disagree.
+    if (e.shiftKey && e.key === 'F7') { e.preventDefault(); sendKey('C-u'); return; }                           // P2 R2 — Clear the typed line (same as menu Clear)
     if (e.shiftKey && e.key === 'F8') { e.preventDefault(); pressEnter(); return; }                             // P2 Y  — Enter / send
 
     // --- 8BitDo Profile 2 (Android only delivers F1-F12; F13+ = Unidentified) ---
     if (e.shiftKey || e.ctrlKey || e.altKey) return;  // base layer = unmodified keys only
-    if (e.key === 'F1') { e.preventDefault(); textMe(); return; }                  // P2 D-pad Left — Text summary (SMS)
+    if (e.key === 'F1') { e.preventDefault(); refreshPage(); return; }              // P2 D-pad Left — Refresh the page
     if (e.key === 'F2') { e.preventDefault(); summaryMe(); return; }               // P2 D-pad Right — Voice summary
     if (e.key === 'F9') { e.preventDefault(); listenPlayPause(); return; }         // P2 D-pad Up — Play/Pause read-back
     // F7 (D-pad Down) unbound — broken micro switch, never fires
@@ -505,6 +505,16 @@ function saveScreenshot() {
             else setStatus('Save failed: ' + (d.error || 'empty screen'));
         }))
         .catch(() => setStatus('Save failed: server error'));
+}
+
+// REFRESH (2026-09-29). The button Patrick reached for after every code change:
+// the phone runs Spark as a PWA with no address bar, so a hard refresh meant
+// closing and reopening the app. `/` is served no-store, so a plain reload
+// fetches the page fresh - that IS the hard refresh here, no cache-buster
+// needed. It took ← from the SMS summary, which stays in the hamburger (📲).
+function refreshPage() {
+    setStatus('↻ refreshing');
+    location.reload();
 }
 
 function textMe() {

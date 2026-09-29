@@ -5,11 +5,11 @@ button is set, in the **8BitDo Ultimate** app, to send a keyboard key (an F-key 
 Shift+F-key). Spark's page (`templates/chat.html`) listens for those keys in its
 `keydown` handler and runs the matching action.
 
-Reference image: `profile_2_map.jpg` (2026-07-19) — the only map kept. Three
-conflicting screenshots used to sit in the repo, from three different dates,
-mapping the same buttons to different keys; the stale two were deleted
-2026-08-06 (recoverable from git). Treat even this one as a hint, not truth —
-run the key debug probe below before trusting any of it.
+**`profile_2_map.jpg` is STALE (confirmed by Patrick 2026-08-07).** It predates
+the shift-layer sync — it shows the face buttons on their old duplicate/dead
+keys, but the shift-layer plan WAS completed on the controller and all buttons
+work. The truth is the `keydown` handler in `templates/chat.html`: every button
+maps 1:1 to a code line. Rebuild the map from the code, not from screenshots.
 
 ---
 
@@ -21,41 +21,46 @@ Spark. So a button is only usable if it sends **F1–F12** (or Shift+F1–F12).
 
 ---
 
-## Current map (every button unique, 2026-07-23)
+## Current map (live, 2026-09-29) — thumb on the face buttons
 
-Base layer = plain F-keys (the 10 buttons that already worked, unchanged).
-Shift layer = the 6 buttons that used to be duplicates or dead, now each on a
-clean `Shift+F-key` so every physical button has its own action.
+Remapped 2026-09-29. The four things done constantly — mic, send, and walking
+left/right through terminals — moved off the d-pad onto **A / Y / X / B**,
+where the thumb already rests. The d-pad took over the read-back jobs, which
+are occasional. **The controller was not touched**: every button still sends
+the key it always sent, only the action behind it changed.
 
-| Physical button | Sends | Spark action (chat.html) | Usable? |
-|---|---|---|---|
-| D-pad ← (Left)  | F1        | Mic toggle            | ✅ |
-| D-pad → (Right) | F2        | Enter                 | ✅ |
-| L               | F4        | Escape / clear        | ✅ |
-| D-pad ↓ (Down)  | F7        | Previous session      | ✅ |
-| L2              | F8        | Backspace             | ✅ |
-| D-pad ↑ (Up)    | F9        | Next session          | ✅ |
-| +               | F10       | Scroll terminal down  | ✅ |
-| −               | F12       | Scroll terminal up    | ✅ |
-| ★ (star)        | Shift+F1  | /new                  | ✅ |
-| **Y**           | **Shift+F8** | **Listen (fresh read-back)** | ✅ |
-| **A**           | **Shift+F2** | **Text me (SMS summary)** | ⏳ reassign in app |
-| **B**           | **Shift+F3** | **Play / Pause read-back** | ⏳ reassign in app |
-| **X**           | **Shift+F4** | **Summary read (1-3 sentences, voice)** | ⏳ reassign in app |
-| **R**           | **Shift+F5** | **Tab** | ⏳ reassign in app |
-| **R2**          | **Shift+F7** | **Copy screen** | ⏳ reassign in app |
-| ❖ (checkered)   | F6 (leave)   | — unbound (F6 = controller power-off) | ⚠️ avoid |
+| Button | Sends | Action | | Button | Sends | Action |
+|---|---|---|---|---|---|---|
+| A | Shift+F2 | Mic on/off | | ← | F1 | Text summary (SMS) |
+| Y | Shift+F8 | Enter / send | | → | F2 | Voice summary |
+| X | Shift+F4 | Terminal ← | | ↑ | F9 | Play / Pause read-back |
+| B | Shift+F3 | Terminal → | | ↓ | F7 | **dead switch — unbound** |
+| R | Shift+F5 | Escape | | L | F4 | Tab |
+| R2 | Shift+F7 | Clear screen (C-l) | | L2 | F8 | Big/Normal text toggle |
+| ★ | Shift+F1 | /new (fresh conversation) | | + | F10 | Page up |
+| ❖ | F6 | unbound — leave (power) | | − | F12 | Page down |
 
 ### Notes
-- **⏳ = code is wired and waiting; the button still needs to be reassigned once in
-  the 8BitDo Ultimate app** to the "Sends" key above (A,B,X,R,R2). After that one
-  pass, every button is unique and future changes are code-only.
-- **Y is now a FRESH read-back every press** (changed 2026-07-23) — it no longer
-  toggles play/pause. Play/pause moved to its own button (B).
-- **Shift layer is proven clean:** Shift+F1 (★) and Shift+F8 (Y) already pass through
-  Android Chrome untouched, so Shift+F2–F5 and Shift+F7 are safe too.
-- **Avoid ❖ (F6):** F6 is fine key-wise, but ❖ is also the controller's power-off
-  button — holding it to power down spams F6. Leave it unbound.
+- **Clear is the SCREEN, not the conversation.** R2 sends `C-l`: wipes the
+  visible scrollback, leaves the session intact. `/clear` and `/compact` stay
+  in the hamburger, where they need a deliberate tap — throwing away context
+  is too destructive for a thumb button.
+- **`C-l` had to be added to `ALLOWED_KEYS` in app.py.** The backend rejects
+  any key not on that list, so a new key binding is two edits, not one: the
+  `keydown` handler AND the allow-list. A missing allow-list entry looks
+  exactly like a dead button.
+- **↓ (F7) is dead hardware** — a broken micro switch, sends no event at all.
+  Nothing can live there. The second summary went to ← instead.
+- **What lost its button:** Listen (fresh read 🎧) and Copy screen — both still
+  in the hamburger. Play/Pause on ↑ covers playback.
+- **The 8BitDo app stays out of the loop.** Future changes are code-only edits
+  in chat.html — never re-open the app unless a physical button needs a
+  brand-new key.
+- **Design rule that decided the cuts:** buttons are for what the mic can't do
+  (Tab, playback control, terminal switching). Anything speakable loses its
+  button first.
+- **Avoid ❖ (F6):** it is also the power button — holding it to power down
+  spams F6. Leave it unbound.
 
 ---
 
@@ -105,7 +110,12 @@ probe runs before any Spark logic and before any network call.
 
 ---
 
-## Probe results — 2026-08-06
+## Probe results — 2026-08-06 (SUPERSEDED — kept as history)
+
+**Patrick corrected this on 2026-08-07:** the shift layer IS on the controller
+and all buttons work — this probe run's shift-layer conclusions (and the
+★=Shift+F5 reading) were wrong, most likely run against the wrong profile.
+Only one finding stands: **↓ is a broken micro switch.** Original notes below.
 
 Measured, not assumed:
 
@@ -119,8 +129,8 @@ Measured, not assumed:
 | **↓** | **nothing** | prev session | ❌ **not reaching the browser** |
 | **★** | **`Shift+F5`** | `Shift+F5` = Tab | ⚠️ doc claimed `Shift+F1` = `/new` |
 
-**↓ sends no event at all.** Reassign it in the 8BitDo Ultimate app (check what
-it is bound to *now* — do not trust the screenshot) and Sync to device.
+**↓ sends no event at all.** Turned out to be a broken micro switch (hardware,
+2026-08-07) — this is what triggered the 180° flip in the map above.
 
 **The ⏳ rows above were never done.** Per `profile_2_map.jpg`, those buttons
 still send their old keys, and they are duplicates or dead:

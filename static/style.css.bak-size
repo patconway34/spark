@@ -1,0 +1,392 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+    /* Colors — Gruvbox Light (warm, cohesive with the cream terminal) */
+    --bg: #ebdbb2;                       /* gruvbox light1 — app background */
+    --surface: #fbf1c7;                  /* light0 — tabs, inputs, cards */
+    --surface-bright: #f9f5d7;           /* light0_hard */
+    --border: rgba(60, 56, 54, 0.14);
+    --border-strong: rgba(60, 56, 54, 0.30);
+
+    --text: #3c3836;                     /* dark1 */
+    --text-dim: #665c54;                 /* dark3 */
+    --text-muted: #7c6f64;               /* dark4 */
+
+    --accent: #af3a03;                   /* gruvbox faded orange */
+    --accent-dim: rgba(175, 58, 3, 0.15);
+    --accent-glow: rgba(175, 58, 3, 0.30);
+
+    --success: #427b58;                  /* gruvbox faded aqua */
+    --danger: #9d0006;                   /* gruvbox faded red */
+    --warning: #b57614;                  /* gruvbox faded yellow */
+
+    /* Layout */
+    --safe-bottom: env(safe-area-inset-bottom, 80px);
+    --header-height: 1.6rem;
+    --control-bg: rgba(235, 219, 178, 0.96);   /* gruvbox light1 */
+
+    /* Fonts */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    overscroll-behavior: contain;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Terminal Container */
+.terminal-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    width: 100vw;
+    min-width: 100vw;
+}
+
+/* Hidden terminals stay full-size (just invisible) so their xterm client
+   never reports a tiny viewport — display:none made tmux collapse to 1 col. */
+.terminal-wrap.term-hidden {
+    visibility: hidden;
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    z-index: -1;
+}
+
+.terminal-frame {
+    width: 100vw !important;
+    min-width: 100vw !important;
+    height: calc(100% + 5px);
+    border: none;
+    background: var(--theme-bg, #f0f0f0);
+    pointer-events: none;
+}
+
+/* Big text mode: lay the iframe out at 62.5% size so xterm re-fits to
+   fewer columns (text rewraps properly), then scale it 1.6x to fill the
+   screen. Net effect: 1.6x bigger text, nothing cut off. */
+body.big-text .terminal-frame {
+    width: 62.5vw !important;
+    min-width: 62.5vw !important;
+    height: calc((100% + 5px) / 1.6);
+    transform: scale(1.6);
+    transform-origin: top left;
+}
+
+
+/* Controls Section */
+#controls {
+    background: var(--control-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border);
+    padding: 0.6rem;
+    padding-bottom: calc(0.6rem + var(--safe-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    flex-shrink: 0;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.key-row {
+    display: flex;
+    gap: 0.4rem;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Buttons */
+.btn {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.75rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.btn:active {
+    transform: scale(0.96);
+    background: var(--surface-bright);
+}
+
+.key-btn {
+    height: 40px;
+    flex: 1;
+    font-family: var(--font-mono);
+    color: var(--text-dim);
+}
+
+.key-btn:active {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.big-btn {
+    height: 42px;
+    flex: 1;
+    font-size: 0.95rem;
+    font-weight: 600;
+    border-radius: 16px;
+    border-width: 1.5px;
+}
+
+.btn-esc {
+    background: rgba(220, 38, 38, 0.08);
+    border-color: rgba(220, 38, 38, 0.25);
+    color: var(--danger);
+}
+
+.btn-enter {
+    background: rgba(5, 150, 105, 0.08);
+    border-color: rgba(5, 150, 105, 0.25);
+    color: var(--success);
+}
+
+.bar-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+}
+
+.ham-yes {
+    background: rgba(5, 150, 105, 0.1) !important;
+    border-color: rgba(5, 150, 105, 0.3) !important;
+    color: var(--success) !important;
+}
+
+.ham-no {
+    background: rgba(220, 38, 38, 0.1) !important;
+    border-color: rgba(220, 38, 38, 0.3) !important;
+    color: var(--danger) !important;
+}
+
+.btn-mic {
+    flex: 1;
+    height: 42px;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+}
+
+#mic-btn.recording {
+    background: var(--danger);
+    border-color: #fff;
+    border-width: 3px;
+    color: #fff;
+    box-shadow: 0 0 0 4px var(--danger), 0 0 20px rgba(220, 38, 38, 0.6);
+    animation: rec-pulse 1s infinite;
+}
+
+/* Tabs */
+#tab-bar {
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 2px 0;
+}
+
+#tab-bar::-webkit-scrollbar { display: none; }
+
+.tab-btn {
+    min-height: 30px;
+    padding: 0.15rem 0.4rem;
+    border-radius: 15px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.65rem;
+    font-weight: 600;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.tab-btn > div {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tab-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    box-shadow: 0 4px 12px var(--accent-dim);
+}
+
+.tab-sub {
+    font-size: 0.6rem;
+    opacity: 0.8;
+    margin-top: -1px;
+}
+
+/* Overlay / Modals */
+#rename-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(8px);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+}
+
+#rename-overlay.open { display: flex; }
+
+#rename-box {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 20px;
+    padding: 1.5rem;
+    width: 90%;
+    max-width: 360px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+}
+
+#rename-box input {
+    width: 100%;
+    padding: 0.8rem 1rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    background: var(--bg);
+    color: #fff;
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    outline: none;
+    font-family: var(--font-sans);
+}
+
+#rename-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+
+#rename-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+}
+
+.rename-sug {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface-bright);
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.rename-sug:active { background: var(--accent); color: #fff; }
+
+#rename-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+}
+
+#rename-actions button {
+    padding: 0.6rem 1.2rem;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+#rename-cancel { background: var(--surface-bright); color: var(--text-dim); }
+#rename-save { background: var(--accent); color: #fff; }
+
+/* Session themes — CSS fallback for the blue/green/red/yellow cycle. applyTheme()
+   in chat.html overrides --theme inline from each session's own color, so these
+   are just the pre-JS fallback. Terminal bg colors are set by the ttyd themes in
+   start.sh; these tint the tab + bottom buttons. */
+/* Single warm accent for every session (Gruvbox faded orange). applyTheme()
+   also sets this inline; kept here as the pre-JS fallback. */
+body[class*="theme-"] { --theme: #af3a03; --theme-dim: rgba(175,58,3,0.12); }
+
+body[class*="theme-"] .tab-btn.active { background: var(--theme); border-color: var(--theme); color: #fff; }
+body[class*="theme-"] .btn-esc { background: var(--theme-dim); border-color: var(--theme); color: var(--theme); }
+body[class*="theme-"] .btn-mic { background: var(--theme); border-color: var(--theme); color: var(--theme-text, #fff); }
+body[class*="theme-"] .btn-enter { background: var(--theme-dim); border-color: var(--theme); color: var(--theme); }
+body[class*="theme-"] #controls { border-top-color: var(--theme); }
+
+/* Recording override — always red+glow regardless of session theme */
+body[class*="theme-"] #mic-btn.recording {
+    background: var(--danger);
+    border-color: #fff;
+}
+
+/* Animations */
+@keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.05); opacity: 0.9; }
+}
+
+@keyframes rec-pulse {
+    0%, 100% { box-shadow: 0 0 0 4px var(--danger), 0 0 20px rgba(220, 38, 38, 0.6); }
+    50% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0.4), 0 0 30px rgba(220, 38, 38, 0.8); }
+}
+
+/* Utilities */
+.app-btn svg {
+    opacity: 0.7;
+}
+
+.app-btn.active {
+    background: var(--accent) !important;
+    color: #fff !important;
+}
+
+.app-btn.active svg {
+    opacity: 1;
+}
+
+/* ── Thin control panel: minimal padding + gaps to give the terminal room ─── */
+#controls {
+    gap: 0.3rem;
+    padding: 0.35rem;
+    padding-bottom: calc(0.35rem + var(--safe-bottom));
+}
+
+/* ── Terminal tabs: one solid-colored pill per terminal (color set inline) ─── */
+#term-bar {
+    display: flex; gap: 0.35rem; padding: 0 0.2rem;
+}
+.term-pill {
+    flex: 1; min-width: 0; height: 28px; border-radius: 14px;
+    border: 1px solid var(--border); font-size: 0.74rem; font-weight: 600;
+    font-family: var(--font-sans); cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    -webkit-tap-highlight-color: transparent; transition: all 0.15s;
+}
+.term-pill.active {
+    font-weight: 700;
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,0.9), 0 2px 8px rgba(0,0,0,0.28);
+}

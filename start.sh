@@ -1,7 +1,7 @@
 #!/bin/bash
 # Spark — start tmux sessions + ttyd terminals (5 numbered sessions)
 #
-# Tab N = sparkN on port 7681+N. Models: all fable 5. Seven terminals; the page
+# Tab N = sparkN on port 7681+N. Models: all opus 5. Seven terminals; the page
 # keeps only the 3 most-recently-viewed iframes live (chat.html MAX_LOADED), so
 # tab count does not drive phone memory. ↑ walks back most-recently-used.
 # A NEW tmux session auto-launches claude with its tab's model; existing
@@ -10,8 +10,8 @@
 
 SESSIONS=("spark1" "spark2" "spark3" "spark4" "spark5" "spark6" "spark7")
 PORTS=(7682 7683 7684 7685 7686 7687 7688)
-MODELS=("claude-fable-5" "claude-fable-5" "claude-fable-5" "claude-fable-5"
-        "claude-fable-5" "claude-fable-5" "claude-fable-5")
+MODELS=("claude-opus-5" "claude-opus-5" "claude-opus-5" "claude-opus-5"
+        "claude-opus-5" "claude-opus-5" "claude-opus-5")
 WORK_DIR="/mnt/c/dev"
 
 # Auth model (2026-07-18): terminals are served same-origin under

@@ -16,4 +16,5 @@ understanding the gotcha it guards against.
 | [ttyd-restart.md](ttyd-restart.md) | ttyd restart races and self-killing pkill |
 | [tmux-trailing-semicolon.md](tmux-trailing-semicolon.md) | `ls -la;` arrives as `ls -la` — tmux eats a trailing `;` |
 | [wsl-interop-cost.md](wsl-interop-cost.md) | Every `wsl -e ...` costs ~130ms — why the tmux helper exists |
+| [wsl-relay-wedge.md](wsl-relay-wedge.md) | Blank tabs = WSL port relay wedged, not ttyd |
 | [misc.md](misc.md) | Smaller traps: send-keys truncation, debug beacons, mouse mode |

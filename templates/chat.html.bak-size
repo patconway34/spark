@@ -413,34 +413,27 @@ document.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.code === 'KeyM') { e.preventDefault(); toggleMic(); return; }
 
     // --- 8BitDo Profile 2, shifted layer (Shift+F-key combos) ---
-    // REMAPPED 2026-09-29 (Patrick). The thumb now lives on the face buttons:
-    // mic, send, and terminal left/right are the four things done constantly,
-    // so they moved off the d-pad onto A/Y/X/B where the thumb already rests.
-    // The d-pad took over the read-back jobs, which are occasional.
-    // The controller itself was NOT touched - every button still sends the key
-    // it always sent; only the action behind it changed.
-    if (e.shiftKey && e.key === 'F1') { e.preventDefault(); sendCommand('/new'); setStatus('/new'); return; }   // P2 ★  — /new (fresh conversation)
-    if (e.shiftKey && e.key === 'F2') { e.preventDefault(); toggleMic(); return; }                             // P2 A  — Mic on/off
-    if (e.shiftKey && e.key === 'F3') { e.preventDefault(); switchSessionByOffset(1); return; }                 // P2 B  — Terminal right
-    if (e.shiftKey && e.key === 'F4') { e.preventDefault(); switchSessionByOffset(-1); return; }                // P2 X  — Terminal left
-    if (e.shiftKey && e.key === 'F5') { e.preventDefault(); sendKey('Escape'); return; }                        // P2 R  — Escape
-    // CLEAR IS THE SCREEN, NOT THE CONVERSATION. Ctrl-L wipes the visible
-    // scrollback and leaves the session intact; /clear would throw away
-    // context, which is too destructive for a thumb button. /clear and
-    // /compact stay in the hamburger where they need a deliberate tap.
-    if (e.shiftKey && e.key === 'F7') { e.preventDefault(); sendKey('C-l'); return; }                           // P2 R2 — Clear screen
-    if (e.shiftKey && e.key === 'F8') { e.preventDefault(); pressEnter(); return; }                             // P2 Y  — Enter / send
+    // Original (pre-flip) hold restored 2026-08-08. D-pad ↓ (F7) is dead
+    // hardware — its old prev-session job is gone; ↑ jumps to the last-used
+    // terminal instead of cycling. See "Button Map and Procedure".
+    if (e.shiftKey && e.key === 'F1') { e.preventDefault(); sendCommand('/new'); setStatus('/new'); return; }   // P2 ★  — /new
+    if (e.shiftKey && e.key === 'F2') { e.preventDefault(); textMe(); return; }                                // P2 A  — Text me (SMS)
+    if (e.shiftKey && e.key === 'F3') { e.preventDefault(); listenPlayPause(); return; }                       // P2 B  — Play/Pause read-back
+    if (e.shiftKey && e.key === 'F4') { e.preventDefault(); summaryMe(); return; }                             // P2 X  — Summary read
+    if (e.shiftKey && e.key === 'F5') { e.preventDefault(); sendKey('Tab'); return; }                          // P2 R  — Tab
+    if (e.shiftKey && e.key === 'F7') { e.preventDefault(); toggleTextSize(); return; }                        // P2 R2 — Big/Normal text toggle
+    if (e.shiftKey && e.key === 'F8') { e.preventDefault(); listenMe(); return; }                              // P2 Y  — Listen (fresh read)
 
     // --- 8BitDo Profile 2 (Android only delivers F1-F12; F13+ = Unidentified) ---
     if (e.shiftKey || e.ctrlKey || e.altKey) return;  // base layer = unmodified keys only
-    if (e.key === 'F1') { e.preventDefault(); textMe(); return; }                  // P2 D-pad Left — Text summary (SMS)
-    if (e.key === 'F2') { e.preventDefault(); summaryMe(); return; }               // P2 D-pad Right — Voice summary
-    if (e.key === 'F9') { e.preventDefault(); listenPlayPause(); return; }         // P2 D-pad Up — Play/Pause read-back
+    if (e.key === 'F1') { e.preventDefault(); toggleMic(); return; }               // P2 D-pad Left — mic
+    if (e.key === 'F2') { e.preventDefault(); pressEnter(); return; }              // P2 D-pad Right — Enter
+    if (e.key === 'F9') { e.preventDefault(); switchToLastSession(); return; }     // P2 D-pad Up — back through recent terminals (chain within 3s)
     // F7 (D-pad Down) unbound — broken micro switch, never fires
-    if (e.key === 'F4') { e.preventDefault(); sendKey('Tab'); return; }            // P2 L — Tab (the one thing the mic cannot do)
-    if (e.key === 'F8') { e.preventDefault(); toggleTextSize(); return; }          // P2 L2 — Big/Normal text toggle
-    if (e.key === 'F10') { e.preventDefault(); scrollTerminal('up'); return; }     // P2 "+" — page up
-    if (e.key === 'F12') { e.preventDefault(); scrollTerminal('down'); return; }   // P2 "−" — page down
+    if (e.key === 'F4') { e.preventDefault(); sendKey('Escape'); return; }         // P2 L — Escape / clear
+    if (e.key === 'F8') { e.preventDefault(); sendKey('BSpace'); return; }         // P2 L2 — Backspace
+    if (e.key === 'F10') { e.preventDefault(); scrollTerminal('down'); return; }   // P2 "+" — page down
+    if (e.key === 'F12') { e.preventDefault(); scrollTerminal('up'); return; }     // P2 "−" — page up
 
     // --- Send ---
     if (e.key === 'Enter' && !e.ctrlKey) { e.preventDefault(); pressEnter(); return; }  // 8BitDo B

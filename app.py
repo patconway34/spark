@@ -335,7 +335,7 @@ def _load_terminals():
 # tmux spark8-15 may still be running in the background, just not surfaced here.
 # Ports are 7681+n, and cloudflare/config.yml already routes /term/spark1-15.
 _TERMINAL_COUNT = 7
-_TAB_MODELS = ["fable"] * _TERMINAL_COUNT
+_TAB_MODELS = ["opus"] * _TERMINAL_COUNT
 _INITIAL_TERMINALS = _load_terminals()
 SESSIONS = [
     {"id": str(n), "name": str(n), "tmux": f"spark{n}", "ttyd_port": 7681 + n,
@@ -560,7 +560,7 @@ def api_sessions():
 
 # Verified against the live Models API 2026-07-25 — claude-opus-5 is real.
 CLAUDE_MODELS = {
-    "fable": "claude-fable-5",
+    "fable": "claude-fable-5-1",
     "opus": "claude-opus-5",
     "sonnet": "claude-sonnet-5",
     "haiku": "claude-haiku-4-5-20251001",
@@ -585,7 +585,7 @@ def launch_session():
     if not cmd:
         return jsonify({"error": "Unknown cli"}), 400
     if cli == "claude":
-        # Default model = the tab's own model (1-5 fable, 6-8 opus, 9 sonnet);
+        # Default model = the tab's own model (all tabs default to opus);
         # an explicit "model" in the request overrides it. Effort is only passed
         # when explicitly requested — otherwise claude uses the settings.json
         # default (high), matching how sessions launch outside Spark.
@@ -641,6 +641,10 @@ def rename_session():
 ALLOWED_KEYS = {
     "Enter", "Escape", "Tab", "BTab", "Up", "Down", "Left", "Right",
     "Space", "PageUp", "PageDown", "C-c", "C-z", "C-d", "C-u", "BSpace",
+    # C-l clears the visible screen and leaves the session alone - the R2
+    # button (2026-09-29). Without it here the button would POST and get back
+    # "Key not allowed", which looks exactly like a dead button.
+    "C-l",
 }
 
 

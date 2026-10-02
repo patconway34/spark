@@ -13,20 +13,29 @@ subscription. `listen` is the ONLY path that uses Patrick's own Claude API
 key (see summarize_last_response) — it's his API-practice surface.
 """
 
+import json
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, "C:/dev")
 
-from mente.simple import ask
+# `from mente.simple import ask` used to live here. Measured 1.10s at import,
+# paid by EVERY mode — including listen/vsummary, which never call it. Now
+# imported lazily inside the two functions that actually use it.
 
 
 # --- Listen button: API path on Patrick's own Claude API key ---------------
 # Spark's terminals stay on subscription; ONLY this summarizer uses the API.
 # Reason: Patrick is practicing API-centered builds for FDE work — you can't
 # use someone's subscription in production. Mirrors plato/faro's setup.
-LISTEN_MODEL = "claude-sonnet-4-6"
+# 2026-10-01: was claude-sonnet-4-6. Both voice buttons do the same job —
+# restate text that is ALREADY WRITTEN, for speech. That needs no reasoning, and
+# Sonnet's extra capability was being paid for in latency on every press.
+# Haiku 4.5 is markedly faster and $1/$5 per MTok against Sonnet's $3/$15.
+# Revert this one line if the read-backs lose fidelity.
+LISTEN_MODEL = "claude-haiku-4-5"
 
 LISTEN_SYSTEM = (
     "You are the voice reader for Spark. Patrick is BLIND and often driving; you "
@@ -57,8 +66,11 @@ VSUMMARY_SYSTEM = (
     "You are given one clean turn: Patrick's message after '[PATRICK ASKED]' and "
     "Claude's reply after '[CLAUDE REPLIED]'. Read Patrick a SHORT spoken summary "
     "of Claude's reply — the gist and any key result, as a complete, self-contained "
-    "thought. This is a real summary, NOT the reply cut off: 1 to 3 sentences, "
-    "never trailing off mid-thought. Natural spoken English — no markdown, "
+    "thought. This is a real summary, NOT the reply cut off. ONE sentence; two "
+    "only if a second is genuinely required. Stay under 200 characters — every "
+    "extra character costs both model time and speech time, and Patrick is "
+    "listening, not reading. Never trail off mid-thought. Natural spoken English "
+    "— no markdown, "
     "asterisks, backticks, or bullets; never read dots or symbols. For a "
     "table/code/diff, say what it is in a few words. It goes straight to "
     "text-to-speech."
@@ -72,33 +84,50 @@ def _api_summarize(text, system, max_tokens):
     button is Patrick's API-practice surface. Loads the key from C:/dev/.env,
     same as plato and faro.
     """
-    import anthropic
+    # Deliberately urllib, NOT the anthropic SDK. Measured 2026-09-30: importing
+    # the SDK costs 1.35s, versus ~0s for stdlib — and this is one plain POST to
+    # the Messages API. Same endpoint, same model, same billing; the SDK's
+    # convenience buys nothing here and cost a third of the button's latency.
+    import urllib.request
     from dotenv import load_dotenv
     load_dotenv("C:/dev/.env")  # provides ANTHROPIC_API_KEY
 
-    client = anthropic.Anthropic()
-    resp = client.messages.create(
-        model=LISTEN_MODEL,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": text}],
+    import os
+    body = json.dumps({
+        "model": LISTEN_MODEL,
+        "max_tokens": max_tokens,
+        "system": system,
+        "messages": [{"role": "user", "content": text}],
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        headers={
+            "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
     )
+    with urllib.request.urlopen(req, timeout=60) as r:
+        payload = json.loads(r.read())
     return "".join(
-        b.text for b in resp.content if getattr(b, "type", None) == "text"
+        b.get("text", "") for b in payload.get("content", [])
+        if b.get("type") == "text"
     ).strip()
 
 
 def summarize_last_response(text):
-    """Full spoken read of the last turn (Y button)."""
+    """Full spoken read of the last turn (R button)."""
     return _api_summarize(text, LISTEN_SYSTEM, 900)
 
 
 def summarize_short_voice(text):
-    """1-3 sentence spoken summary of the last turn (X button)."""
+    """One-sentence spoken summary of the last turn (Y button)."""
     return _api_summarize(text, VSUMMARY_SYSTEM, 400)
 
 
 def summarize_for_text(text):
+    from mente.simple import ask
     return ask(
         text,
         system=(
@@ -118,6 +147,7 @@ def summarize_for_text(text):
 
 
 def summarize_for_voice(text):
+    from mente.simple import ask
     personality = Path("C:/dev/flint/personality.md").read_text(encoding="utf-8")
     return ask(
         text,
@@ -207,7 +237,23 @@ def _tts(text, mp3_path):
     raise RuntimeError("all TTS engines failed — " + " | ".join(errors))
 
 
+def _emit_timing(t_proc, t_sum, summary):
+    """One machine-readable line app.py forwards into spark.log.
+
+    startup  = cold Windows-python boot + imports, paid on EVERY press
+    summarize= the billed model call
+    tts      = audio synthesis, which scales with summary length
+    """
+    now = time.time()
+    print(f"NOTIFY_T: startup+summarize={t_sum - t_proc:.2f}s "
+          f"tts={now - t_sum:.2f}s chars={len(summary)} "
+          f"proc_total={now - t_proc:.2f}s")
+
+
 def main():
+    # TIMING (2026-09-30): print a NOTIFY_T: line that app.py folds into
+    # spark.log, so the summarize-vs-TTS split is visible per run.
+    _t_proc = time.time()
     mode = sys.argv[1]
     input_file = Path(sys.argv[2])
     text = input_file.read_text(encoding="utf-8")
@@ -265,11 +311,32 @@ def main():
             # Don't read raw terminal noise aloud — keep it clean.
             summary = "Sorry, I couldn't summarize the terminal right now. Please try again."
             print(f"SUMMARIZE_FAILED ({e})")
+        _t_sum = time.time()
         _log_listen(text, summary)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         mp3_path = Path(f"C:/dev/spark/_listen_{ts}.mp3")
         _tts(summary, mp3_path)
+        _emit_timing(_t_proc, _t_sum, summary)
         print(f"MP3:{mp3_path}")
+
+    elif mode in ("listen_text", "vsummary_text"):
+        # Summary ONLY - no audio. app.py synthesizes with a Piper voice it keeps
+        # warm in memory, because Piper's model load costs 1.66s and notify.py is
+        # spawned fresh on every press. Doing TTS here would pay that every time
+        # and throw away Piper's entire speed advantage.
+        try:
+            summary = (summarize_last_response(text) if mode == "listen_text"
+                       else summarize_short_voice(text))
+            if not summary:
+                summary = "Nothing new has happened yet."
+        except Exception as e:
+            summary = "Sorry, I couldn't summarize right now. Please try again."
+            print(f"SUMMARIZE_FAILED ({e})")
+        _log_listen(text, summary)
+        _emit_timing(_t_proc, time.time(), summary)
+        # json-encoded: a summary can contain newlines, and this has to survive
+        # as a single parseable stdout line.
+        print("SUMMARY:" + json.dumps(summary))
 
     elif mode == "vsummary":
         # X button: 1-3 sentence SPOKEN summary (same gist as the Text button),
@@ -281,10 +348,12 @@ def main():
         except Exception as e:
             summary = "Sorry, I couldn't summarize right now. Please try again."
             print(f"SUMMARIZE_FAILED ({e})")
+        _t_sum = time.time()
         _log_listen(text, summary)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         mp3_path = Path(f"C:/dev/spark/_listen_{ts}.mp3")
         _tts(summary, mp3_path)
+        _emit_timing(_t_proc, _t_sum, summary)
         print(f"MP3:{mp3_path}")
 
 

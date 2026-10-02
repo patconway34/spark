@@ -1,0 +1,17 @@
+{
+  "_readme": "Powers both the hamburger's quick model-switch buttons and the /config settings page. Each entry sends its 'command' as literal text into a terminal (same as typing it and hitting Enter) - so any slash command works. Edit this file and refresh the Spark page (no restart needed) to see changes. Confirmed live 2026-09-29: /model <id>, /effort low|medium|high, and /fast are all real. Opus 5.5 and Fable 5.1 exist but are version-gated (Fable 5.1 needs CLI 2.1.255+, Opus 5.5 needs 2.1.280+) - check '/model' with no args in a terminal to see what's actually unlocked before adding their ids here.",
+  "model": [
+    {"label": "→ Fable 5.1", "command": "/model claude-fable-5-1"},
+    {"label": "→ Opus 5", "command": "/model claude-opus-5"},
+    {"label": "→ Sonnet 5", "command": "/model claude-sonnet-5"},
+    {"label": "→ Haiku 4.5", "command": "/model claude-haiku-4-5-20251001"}
+  ],
+  "effort": [
+    {"label": "Low", "command": "/effort low"},
+    {"label": "Medium", "command": "/effort medium"},
+    {"label": "High", "command": "/effort high"}
+  ],
+  "speed": [
+    {"label": "⚡ Toggle Fast Mode", "command": "/fast"}
+  ]
+}

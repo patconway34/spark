@@ -21,6 +21,11 @@
     --warning: #b57614;                  /* gruvbox faded yellow */
 
     /* Layout */
+    /* Space reserved under the controls for the Android nav bar.
+       env() is the correct question to ask, but Android Chrome usually declines
+       to answer, so in practice the FALLBACK is what ships. That made this a
+       flat 80px in every state — right when folded (the nav bar really does eat
+       it), pure waste when unfolded. The @media override below fixes that. */
     --safe-bottom: env(safe-area-inset-bottom, 80px);
     --header-height: 1.6rem;
     --control-bg: rgba(235, 219, 178, 0.96);   /* gruvbox light1 */
@@ -28,6 +33,51 @@
     /* Fonts */
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* ── Fold state: measured by width, not by asking Android ───────────────────
+   MEASURED 2026-09-30: Fold 7 cover = 514px, inner panel = 936px, desktop
+   browser = 1400px. Breakpoint sits at 720px — the midpoint of the two phone
+   widths, ~206px of clearance on either side. Do NOT tighten it toward 514:
+   Android's display-zoom and font-size settings change the reported CSS width,
+   and a breakpoint hugging that number would flip to the wrong state the first
+   time one of those moves. Desktop (1400) correctly lands in the roomy bucket.
+   A width query re-evaluates the instant you unfold — no reload, no JS, no
+   dependence on env() working. Only --safe-bottom moves; everything that
+   consumes it follows on its own. */
+@media (min-width: 720px) {
+    :root {
+        --safe-bottom: env(safe-area-inset-bottom, 16px);
+    }
+}
+
+/* Spacer div at the end of #controls. Was a hard-coded inline height:60px, which
+   stacked ON TOP of --safe-bottom — 140px of dead space when unfolded. Folded
+   keeps the original 60px (it is genuinely needed there; see the comment in
+   chat.html). Unfolded reclaims most of it. */
+#bottom-buffer { height: 60px; }
+
+@media (min-width: 720px) {
+    #bottom-buffer { height: 8px; }
+}
+
+/* ── Installed app vs browser tab ───────────────────────────────────────────
+   The generous bottom padding exists for ONE reason: Android's nav bar overlaps
+   the bottom of a browser tab. The installed PWA runs display:fullscreen, where
+   there is no nav bar and no URL bar to dodge — so that padding is pure waste
+   there, in BOTH fold states.
+   This is why the rule is keyed to display-mode rather than to fold width: it
+   distinguishes "installed app" from "browser tab" automatically, so the
+   browser fallback keeps its full protective padding untouched. Open Spark in a
+   tab and it is spacious again with no setting to flip.
+   MUST stay after the width queries above — same specificity, so source order
+   decides, and this needs to win in both folded and unfolded. A small residue is
+   kept (not 0) because a gesture swipe can still summon the nav bar briefly. */
+@media (display-mode: fullscreen), (display-mode: standalone) {
+    :root {
+        --safe-bottom: env(safe-area-inset-bottom, 6px);
+    }
+    #bottom-buffer { height: 6px; }
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -73,17 +123,205 @@ body {
     pointer-events: none;
 }
 
-/* Big text mode: lay the iframe out at 62.5% size so xterm re-fits to
-   fewer columns (text rewraps properly), then scale it 1.6x to fill the
-   screen. Net effect: 1.6x bigger text, nothing cut off. */
+/* Big text = a CSS scale on the terminal iframe. No restart, no ttyd involved —
+   it applies the instant the class flips, which is why the button is instant.
+   2026-10-01: eased 1.6 -> 1.35 -> 1.18. The base ttyd font went 15 -> 17 the
+   same day, so big-text no longer has to do the heavy lifting: regular is now
+   ~17px and big is ~20px, a small step instead of a jolt. Tune the two together
+   — raising the base font means this multiplier should come DOWN, not stay.
+   The width and height must stay in step with the scale: the frame is grown to
+   1/scale of the viewport so that after scaling it fills it exactly. Change the
+   scale and all three numbers change together, or the terminal overflows. */
 body.big-text .terminal-frame {
-    width: 62.5vw !important;
-    min-width: 62.5vw !important;
-    height: calc((100% + 5px) / 1.6);
-    transform: scale(1.6);
+    width: 85vw !important;          /* 100 / 1.18 */
+    min-width: 85vw !important;
+    height: calc((100% + 5px) / 1.18);
+    transform: scale(1.18);
     transform-origin: top left;
 }
 
+
+/* ── File rail (IDE-style) ─────────────────────────────────────────────────
+   A thin, collapsible path picker. Exists for ONE job: tapping a filename is
+   instant, while dictating "templates/chat.html" by voice is miserable.
+   Hidden entirely below the 720px fold breakpoint — on the 514px cover screen
+   a rail would eat half the terminal, and the terminal is the point. */
+/* Deliberately an OVERLAY, not a flex sibling. Making the rail shrink the
+   terminal would change the iframe's width, which changes xterm's column count,
+   which reflows the tmux pane (window-size is "latest") — every open and close
+   would rewrap the terminal you are reading. Floating above it costs nothing. */
+#file-rail {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 150px;
+    bottom: 0;
+    z-index: 40;              /* above the terminal iframes, below the toast */
+    background: var(--surface);
+    border-right: 1px solid var(--border-strong);
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.12);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    -webkit-user-select: none;
+    user-select: none;
+    padding-bottom: 40vh;     /* clear the controls so the last rows are tappable */
+}
+body.rail-open #file-rail { display: block; }
+
+#rail-head {
+    position: sticky;
+    top: 0;
+    background: var(--surface-bright);
+    border-bottom: 1px solid var(--border);
+    padding: 4px 6px;
+    color: var(--text-muted);
+    font-size: 0.58rem;
+    word-break: break-all;
+    line-height: 1.25;
+}
+
+.rail-row {
+    padding: 5px 6px;
+    border-bottom: 1px solid rgba(60, 56, 54, 0.06);
+    color: var(--text);
+    word-break: break-all;
+    line-height: 1.2;
+    cursor: pointer;
+}
+.rail-row:active { background: var(--accent-dim); color: var(--accent); }
+.rail-dir { color: var(--accent); font-weight: 600; }
+.rail-up  { color: var(--text-muted); font-style: italic; }
+
+/* ── Hamburger menu ───────────────────────────────────────────────────────
+   Was 24 identical 28px buttons in one wrapped blob: nothing had priority and
+   every target was small for a phone used on the move. Now grouped under labels
+   with 36px targets. Styling lives here rather than in 24 inline style="" attrs,
+   so a size change is one edit instead of twenty-four. */
+#hamburger-panel {
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.5rem 0.4rem 0.2rem;
+    max-height: 52vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.ham-group { display: flex; flex-direction: column; gap: 0.25rem; }
+
+.ham-label {
+    font-size: 0.52rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    padding-left: 2px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 2px;
+}
+
+.ham-row { display: flex; gap: 0.3rem; }
+
+/* Every button in the menu: one rule instead of 24 inline styles. */
+#hamburger-panel .key-btn {
+    height: 36px;
+    font-size: 0.66rem;
+    flex: 1;
+    min-width: 0;
+    padding: 0 2px;
+}
+#hamburger-panel .ham-yes,
+#hamburger-panel .ham-no { font-weight: 700; font-size: 0.72rem; }
+
+/* ── Diff / preview sheet ──────────────────────────────────────────────────
+   A dismissible full-screen sheet, NOT a column. On a 936px fold there is no
+   room for a permanent second panel, and reviewing a diff is a thing you do and
+   then stop doing — phone-app shape, not VS Code shape. */
+#sheet {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 60;              /* above the file rail (40), below the toast */
+    background: var(--surface-bright);
+    flex-direction: column;
+}
+body.sheet-open #sheet { display: flex; }
+
+#sheet-bar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border-strong);
+}
+#sheet-title {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    word-break: break-all;
+}
+#sheet-body {
+    flex: 1;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 8px 10px calc(30vh + var(--safe-bottom));
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    line-height: 1.35;
+    white-space: pre;         /* diffs are column-aligned; never wrap them */
+}
+/* Diff colouring, kept close to the gruvbox palette already in use. */
+.d-add { color: #427b58; }                    /* faded aqua  */
+.d-del { color: #9d0006; }                    /* faded red   */
+.d-hdr { color: var(--text-muted); font-weight: 600; }
+.d-hunk { color: #b57614; font-weight: 600; } /* faded yellow */
+
+/* ── Changes accordion ─────────────────────────────────────────────────────
+   Every changed file is a collapsible header with its diff inline underneath.
+   Opens collapsed, so the first thing you see is the whole shape of the change
+   set — 15 filenames in one view — and you unfold only what you care about.
+   Several can be open at once; opening one never closes another. */
+.git-row {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+    cursor: pointer;
+}
+.git-code {
+    flex: 0 0 auto;
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 0.58rem;
+}
+.git-caret {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 0.55rem;
+    width: 9px;
+}
+.git-name { flex: 1; min-width: 0; word-break: break-all; }
+
+/* The inline diff. Indented and rule-marked so it reads as belonging to the
+   header above it rather than as another list item. */
+.git-diff {
+    display: none;
+    margin: 0 0 6px 10px;
+    padding: 5px 0 5px 7px;
+    border-left: 2px solid var(--border-strong);
+    white-space: pre;
+    overflow-x: auto;          /* diffs are wide; scroll them, never wrap */
+    overscroll-behavior-x: contain;
+    font-size: 0.58rem;
+    line-height: 1.3;
+}
+.git-diff.open { display: block; }
+.git-row.open { background: var(--accent-dim); }
 
 /* Controls Section */
 #controls {
@@ -390,3 +628,685 @@ body[class*="theme-"] #mic-btn.recording {
     font-weight: 700;
     box-shadow: inset 0 0 0 2px rgba(255,255,255,0.9), 0 2px 8px rgba(0,0,0,0.28);
 }
+
+/* ── Desktop IDE layout (2026-10-02) ───────────────────────────────────────
+   On a real desktop the file rail stops being a popover and becomes a docked
+   pane: terminal on the right, tree on the left, the way an editor looks.
+
+   This is the one case where the "overlay, never a flex sibling" rule above
+   does NOT apply, and the reason is worth keeping. That rule exists because a
+   rail that opens and closes keeps CHANGING the iframe width, and every change
+   re-columns xterm and rewraps the tmux pane you are reading. A rail that is
+   simply always there changes the width exactly once, at page load, before
+   there is anything to rewrap. Permanence is what makes docking safe — so if
+   you ever make this pane auto-hide, go back to the overlay.
+
+   Breakpoint is 1100px, not the 720px fold line: the Fold's 936px inner panel
+   keeps the overlay, because 220px of rail out of 936 is a real bite out of the
+   terminal. Desktop (1400px+) has the room to spend. */
+@media (min-width: 1100px) {
+    /* Three panes: files | work | terminal.
+       Width budget, measured on Patrick's 1489px desktop. ttyd runs JetBrains
+       Mono at 17px, ~10.2px per column, so terminal columns = its px / 10.2.
+         rail 200 + middle 400  ->  terminal 889px  ->  ~87 columns
+       87 matters: every CLI in the world assumes 80, and Claude Code's boxes
+       and diffs wrap badly below it. That is the ceiling on the middle pane —
+       widen it past ~460 and the terminal drops under 80. */
+    :root { --rail-w: 200px; --mid-w: 680px; }
+
+    /* Docked and open by default — no rail-open class needed here. */
+    #file-rail {
+        display: block;
+        position: fixed;
+        width: var(--rail-w);
+        font-size: 0.72rem;        /* mouse-sized, not thumb-sized */
+        padding-bottom: 8px;       /* the 40vh thumb-reach pad is phone-only */
+        box-shadow: none;          /* docked panes do not float */
+    }
+    #rail-head { font-size: 0.66rem; padding: 6px 8px; }
+    .rail-row  { padding: 4px 8px; }
+    .rail-row:hover { background: var(--accent-dim); color: var(--accent); }
+
+    /* The terminal gives up exactly the rail's width and nothing else.
+       term-hidden wraps are absolute with left:0, so they need the same
+       margin — if the hidden panes sit at a different width than the visible
+       one, their xterm reports a different column count and the terminal
+       rewraps the moment you switch tabs. */
+    /* --panes = everything the terminal does NOT get. One variable so the
+       collapse rules below only have to redefine it, not re-do the math in
+       six places. */
+    :root { --panes: calc(var(--rail-w) + var(--mid-w)); }
+
+    .terminal-wrap,
+    .terminal-wrap.term-hidden {
+        width: calc(100vw - var(--panes));
+        min-width: calc(100vw - var(--panes));
+        margin-left: var(--panes);
+    }
+    .terminal-frame {
+        width: calc(100vw - var(--panes)) !important;
+        min-width: calc(100vw - var(--panes)) !important;
+    }
+    /* Keep car mode's scale math intact: the frame is grown to 1/scale of the
+       space it actually has, which is the viewport MINUS the two panes. */
+    body.big-text .terminal-frame {
+        width: calc((100vw - var(--panes)) / 1.18) !important;
+        min-width: calc((100vw - var(--panes)) / 1.18) !important;
+    }
+
+    /* The tabs, type bar and MIC/ESC/ENTER belong to the TERMINAL, so they sit
+       under it rather than spanning the panes. That is also what keeps the two
+       panes full-height. */
+    #controls { margin-left: var(--panes); }
+
+    /* ── The middle pane ───────────────────────────────────────────────────
+       Same #sheet the phone opens as a bottom sheet — docked as a column here
+       instead of rebuilt. Every view already written (diff, file, charts)
+       lands in it unchanged, and the phone keeps the sheet it had. */
+    #sheet {
+        display: flex;
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: var(--rail-w);
+        right: auto;
+        width: var(--mid-w);
+        border-right: 1px solid var(--border-strong);
+        box-shadow: none;
+        z-index: 41;          /* above the rail's 40, below the toast */
+    }
+    /* The bottom sheet needed 30vh of clearance for the phone controls; a
+       docked column has the controls beside it, not over it. */
+    /* Container #3 was the pane's own padding. Rows run edge to edge now;
+       only the prose and gallery views re-introduce a margin, because reading
+       wants one and a diff does not. */
+    #sheet-body { padding: 0 0 12px; font-size: 0.66rem; }
+    #sheet-body > .md, #sheet-body > .fv-grid, #sheet-body > table.csv { margin: 10px; }
+    #sheet-body > .fv-code, #sheet-body > .fv-img, #sheet-body > .fv-pdf { margin: 0 6px; }
+    /* Wrap in the pane: 400px cannot hold a long diff line, and a horizontal
+       scrollbar in a narrow column is worse than a wrapped line. */
+    #sheet-body { white-space: pre-wrap; word-break: break-word; }
+
+    /* 2026-10-02: the middle pane does not hide either — Patrick's call, same
+       as the rail. Three panes, permanent, resizable. The Hide button goes
+       away rather than becoming a no-op, because a button that does nothing is
+       worse than no button. The phone keeps its Close: there the sheet is an
+       overlay on top of the terminal and MUST be dismissable. */
+    #sheet-close { display: none; }
+
+    /* 📁 Files collapses the pane and hands the width back. This DOES rewrap
+       the terminal once — accepted, because it is a deliberate press, not a
+       side effect of opening a file picker. Listed last so it beats the
+       docked rules above at equal specificity. */
+    body.rail-collapsed #file-rail { display: none; }
+    body.rail-collapsed { --rail-w: 0px; }
+    body.rail-collapsed #sheet { left: 0; }
+}
+
+/* ── Rail icons + the insert button (2026-10-02) ───────────────────────────
+   The row became three columns: icon, name, "+". The icon column is fixed so
+   names align down a readable left edge; without that, one 2-char emoji makes
+   the whole list ragged. */
+.rail-row {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+}
+.rail-icon {
+    flex: 0 0 1.1em;
+    text-align: center;
+    font-size: 0.9em;       /* emoji run large — pull them back to the text */
+    line-height: 1;
+}
+/* One line per file. The name is middle-truncated in JS (see midTrunc) so the
+   extension and the distinguishing tail survive; this just guarantees the row
+   never wraps if the truncation estimate is off by a character. */
+.rail-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Path-to-type-bar, the rail's original job, now that the row tap opens the
+   file. Dim until you hover the row so it does not compete with the name. */
+.rail-ins {
+    flex: 0 0 auto;
+    padding: 0 4px;
+    color: var(--text-muted);
+    opacity: 0;
+    font-weight: 700;
+}
+.rail-row:hover .rail-ins { opacity: 1; }
+.rail-ins:hover { color: var(--accent); }
+/* No hover on a touchscreen, so there it is always visible. */
+@media (hover: none) {
+    .rail-ins { opacity: 0.55; padding: 0 8px; }
+}
+
+/* ── File viewer ───────────────────────────────────────────────────────────
+   Lives in the same sheet as the diff. Line numbers are a click target, not
+   decoration: tapping one puts "file.py:123" in the type bar. */
+.fv-line { display: flex; align-items: baseline; }
+.fv-num {
+    flex: 0 0 3.2em;
+    text-align: right;
+    padding-right: 0.7em;
+    color: var(--text-muted);
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+}
+.fv-num:hover { color: var(--accent); background: var(--accent-dim); }
+.fv-text { flex: 1 1 auto; white-space: pre-wrap; word-break: break-word; }
+.fv-trunc {
+    color: var(--warning);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 3px;
+    margin-bottom: 4px;
+}
+
+/* ── Images, charts and PDFs in the sheet (2026-10-02) ─────────────────────
+   vigor is 71 PNGs and 17 PDFs. Reading that folder means LOOKING at it, so
+   the sheet serves pictures as pictures. */
+.fv-img {
+    max-width: 100%;
+    height: auto;
+    background: #fff;        /* matplotlib PNGs are transparent-backed */
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.fv-pdf { width: 100%; height: 70vh; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+
+/* Newest-first chart gallery. auto-fill rather than a fixed column count so
+   it works at rail-width on a phone and at pane-width on the desktop. */
+.fv-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+}
+.fv-cell {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    padding: 4px;
+    cursor: pointer;
+    overflow: hidden;
+}
+.fv-cell:hover { border-color: var(--accent); }
+.fv-cell img { width: 100%; height: auto; display: block; }
+.fv-cap {
+    font-size: 0.58rem;
+    color: var(--text-muted);
+    padding-top: 3px;
+    word-break: break-all;
+    line-height: 1.2;
+}
+
+/* ── Syntax colours + readable rail (2026-10-02) ───────────────────────────
+   Gruvbox-light roles, the same family the terminal uses, so the pane and the
+   terminal do not look like two different apps. */
+.h-com { color: #928374; font-style: italic; }   /* gray      */
+.h-str { color: #79740e; }                       /* green     */
+.h-kw  { color: #9d0006; font-weight: 600; }     /* red       */
+.h-num { color: #8f3f71; }                       /* purple    */
+
+/* Project picker — a grid, not a dropdown: /dev has ~100 folders. */
+.proj-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 5px;
+}
+.proj-cell {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    cursor: pointer;
+    font-size: 0.68rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.proj-cell:hover { border-color: var(--accent); color: var(--accent); }
+.proj-cell.current { border-color: var(--accent); background: var(--accent-dim); font-weight: 600; }
+
+@media (min-width: 1100px) {
+    /* 2026-10-02, second pass: the rail went to 260px and that was the wrong
+       pane to grow. It is a PICKER — you read a name and click it — so it only
+       needs to fit a filename. The VIEWER is the thing you read, so the width
+       goes there. Rail back to 170.
+
+       Budget on 1489px: 170 rail + 680 viewer = 639px terminal, ~63 columns.
+       That is deliberately below the 80 columns every CLI assumes — Patrick's
+       call, after being told. Claude Code reflows and stays usable; its boxes
+       and wide diffs wrap. The splitter below is the escape hatch: drag right
+       for a wider terminal whenever the wrapping gets in the way. */
+    :root { --rail-w: 170px; }
+    #file-rail { font-size: 0.70rem; }
+    #rail-head {
+        font-size: 0.66rem;
+        padding: 7px 8px;
+        cursor: pointer;            /* it is the project switcher */
+        font-weight: 600;
+        color: var(--text);
+    }
+    #rail-head:hover { color: var(--accent); }
+    .rail-row { padding: 4px 8px; line-height: 1.3; }
+    .rail-icon { flex: 0 0 1.15em; }
+    /* Folders bolder — an explorer should show the shape of the project
+       before the contents of it. */
+    .rail-dir { font-weight: 600; }
+    /* This pane does not close, so there is nothing to leave room for. */
+    body.rail-collapsed #file-rail { display: block; }
+    body.rail-collapsed { --rail-w: 170px; }
+
+    /* The viewer is the point: give it the readable type size, not the rail. */
+    #sheet-body { font-size: 0.74rem; line-height: 1.45; }
+    #sheet-title { font-size: 0.72rem; }
+
+    /* ── Splitter ─────────────────────────────────────────────────────────
+       Drag the viewer/terminal boundary. Width is applied on RELEASE, not
+       during the drag: every width change re-columns xterm and rewraps the
+       tmux pane, and doing that on every mousemove is a reflow storm. A guide
+       line follows the cursor instead. */
+    .splitter {
+        display: block;
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        width: 7px;
+        margin-left: -3px;
+        z-index: 55;
+        cursor: col-resize;
+        background: transparent;
+    }
+    .splitter:hover { background: var(--accent-glow); }
+    /* Two boundaries, two handles: files|viewer and viewer|terminal. */
+    #splitter-rail { left: var(--rail-w); }
+    #splitter { left: calc(var(--rail-w) + var(--mid-w)); }
+    #split-guide {
+        display: none;
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: var(--accent);
+        z-index: 70;
+        pointer-events: none;
+    }
+    body.splitting #split-guide { display: block; }
+    body.splitting { cursor: col-resize; user-select: none; }
+}
+
+/* ── Format-aware views in the middle pane (2026-10-02) ────────────────────
+   The pane is the one surface no terminal has, so a file gets to look like
+   what it is: prose reads as prose, a table reads as a table. These override
+   #sheet-body's monospace/pre, which is right for code and wrong for notes. */
+.md {
+    font-family: var(--font-sans);
+    white-space: normal;
+    line-height: 1.55;
+    max-width: 62ch;          /* measure, not full width — this is reading */
+}
+.md-h { margin: 0.9em 0 0.35em; line-height: 1.25; color: var(--text); }
+.md h1.md-h { font-size: 1.35rem; }
+.md h2.md-h { font-size: 1.15rem; }
+.md h3.md-h { font-size: 1.02rem; }
+.md h4.md-h, .md h5.md-h, .md h6.md-h { font-size: 0.94rem; }
+.md-p { margin: 0.5em 0; }
+.md-list { margin: 0.4em 0 0.6em 1.3em; }
+.md-list li { margin: 0.18em 0; }
+.md-quote {
+    margin: 0.6em 0;
+    padding: 0.2em 0 0.2em 0.8em;
+    border-left: 3px solid var(--accent);
+    color: var(--text-dim);
+    font-style: italic;
+}
+.md-hr { border: none; border-top: 1px solid var(--border-strong); margin: 1.1em 0; }
+.md code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0 3px;
+}
+.md-pre {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin: 0.6em 0;
+    overflow-x: auto;         /* code does NOT wrap, it scrolls */
+    white-space: pre;
+}
+.md a { color: var(--accent); }
+
+/* CSV as a real grid, with a sticky header so scrolling 300 rows keeps the
+   column names in view. */
+table.csv {
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    white-space: nowrap;
+    width: max-content;
+    max-width: none;
+}
+table.csv th, table.csv td {
+    border: 1px solid var(--border);
+    padding: 3px 7px;
+    text-align: left;
+}
+table.csv th {
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    font-weight: 600;
+    color: var(--text-dim);
+}
+table.csv tbody tr:nth-child(even) { background: rgba(60, 56, 54, 0.035); }
+table.csv tbody tr:hover { background: var(--accent-dim); }
+.csv-note { color: var(--text-muted); font-size: 0.62rem; padding-top: 6px; }
+
+/* ── Git strip at the foot of the file pane (2026-10-02) ───────────────────
+   Always-on answer to "where are we in git". Pinned to the bottom of the rail
+   rather than floating in the viewer, because it belongs to the FOLDER you are
+   in, and the rail is the folder. */
+#git-bar {
+    display: none;
+    position: sticky;
+    bottom: 0;
+    margin-top: auto;
+    padding: 6px 8px;
+    border-top: 1px solid var(--border-strong);
+    background: var(--surface-bright);
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    line-height: 1.35;
+    cursor: pointer;
+}
+#git-bar:hover { background: var(--surface); }
+/* A dirty repo gets a warm left edge — visible in peripheral vision, which is
+   the point of a status line. */
+#git-bar.git-dirty { border-left: 3px solid var(--warning); }
+#git-bar.git-clean { border-left: 3px solid var(--success); }
+#git-bar.git-plain { color: var(--text-muted); border-left: 3px solid transparent; cursor: default; }
+.gb-row { display: flex; flex-wrap: wrap; gap: 5px; align-items: baseline; }
+.gb-branch { font-weight: 700; color: var(--text); }
+.gb-ahead { color: var(--success); }
+.gb-behind { color: var(--accent); }
+.gb-staged { color: #427b58; }
+.gb-unstaged { color: #b57614; }
+.gb-untracked { color: var(--text-muted); }
+.gb-conflict { color: var(--danger); font-weight: 700; }
+.gb-ok { color: var(--success); }
+.gb-last { color: var(--text-muted); padding-top: 4px; word-break: break-word; }
+.gb-when { color: var(--text-muted); font-style: italic; }
+
+/* The rail becomes a column so the strip can sit at its foot. */
+#file-rail { display: none; flex-direction: column; }
+body.rail-open #file-rail { display: flex; }
+@media (min-width: 1100px) {
+    #file-rail { display: flex; }
+    body.rail-collapsed #file-rail { display: flex; }
+    #rail-list { flex: 1 1 auto; overflow-y: auto; }
+    #git-bar { font-size: 0.64rem; }
+}
+
+/* ── Reading a long filename (2026-10-02) ──────────────────────────────────
+   Truncation keeps the list scannable; these three things make the full name
+   reachable, in rising order of deliberateness:
+     1. hover  — the row expands and wraps (JS swaps in the full string)
+     2. click  — it STAYS expanded, and marks which file the pane is showing
+     3. drag   — widen the pane with the splitter; names re-truncate wider
+   Plus the viewer's title bar always carries the whole path. */
+.rail-row:hover .rail-name,
+.rail-row.sel .rail-name {
+    white-space: normal;
+    word-break: break-all;
+    overflow: visible;
+}
+.rail-row:hover { background: var(--surface-bright); }
+.rail-row.sel {
+    background: var(--accent-dim);
+    border-left: 2px solid var(--accent);
+    padding-left: 6px;              /* 8px row padding minus the 2px border */
+}
+.rail-row.sel .rail-name { color: var(--accent); font-weight: 600; }
+
+/* ── Zenburn, for the code surface (2026-10-02) ────────────────────────────
+   Patrick's ask: the warm brown-gray Zenburn background with its olive and
+   dusty-red syntax, for the viewer and the diff. Scoped to .fv-code — the pane
+   chrome (titles, markdown prose, CSV grids, the rail) stays light. That split
+   is what editors do: dark buffer, light UI. */
+.fv-code {
+    background: #3f3f3f;
+    color: #dcdccc;
+    border: 1px solid #2e2e2e;
+    border-radius: 6px;
+    padding: 8px 2px 10px 0;
+    margin: 2px 0 6px;
+    font-family: var(--font-mono);
+    overflow-x: auto;
+}
+
+/* Gutter: dimmer than the code, with a hairline so the numbers read as a
+   column rather than as part of the first token. */
+.fv-code .fv-num {
+    color: #6f6f6f;
+    border-right: 1px solid #4f4f4f;
+    margin-right: 0.6em;
+    background: #484848;
+}
+.fv-code .fv-num:hover { color: #f0dfaf; background: #5f5f5f; }
+.fv-code .fv-line:hover { background: #4a4a4a; }
+
+/* Zenburn syntax roles */
+.fv-code .h-com { color: #7f9f7f; font-style: italic; }   /* sage green   */
+.fv-code .h-str { color: #cc9393; }                       /* dusty red    */
+.fv-code .h-kw  { color: #f0dfaf; font-weight: 600; }     /* pale yellow  */
+.fv-code .h-num { color: #8cd0d3; }                       /* soft cyan    */
+
+/* Diff, on the same surface */
+.fv-code .d-add  { color: #7f9f7f; }
+.fv-code .d-del  { color: #cc9393; }
+.fv-code .d-hdr  { color: #9f9f9f; font-weight: 600; }
+.fv-code .d-hunk { color: #dfaf8f; font-weight: 600; }    /* zenburn orange */
+.fv-code .fv-trunc { color: #dfaf8f; border-bottom-color: #5f5f5f; padding-left: 10px; }
+
+/* ── Changes: one container per file (2026-10-02) ──────────────────────────
+   Second pass. The first had three nested boxes for a single file — the list
+   row, a bordered file card, and the pane — each with its own padding, border
+   and scrollbar, so the chrome cost more space than the content. Now the FILE
+   ROW *is* the container: click it and its hunks hang directly underneath. No
+   card, no inner border, nothing to nest.
+
+   Collapsed by default, and any number can be open at once: the review you
+   actually do is comparing the two or three files an agent touched together.
+
+   Light, not Zenburn — a diff is a comparison, not a buffer, and dark mutes
+   the green/red that does all the work here. */
+
+/* The row: caret, status letter, name, +/- counts, open-in-editor arrow. */
+.gfile {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    background: var(--surface);
+}
+.gfile:hover { background: var(--surface-bright); }
+/* An open file's header sticks while you scroll its hunks — that is the
+   "which file am I looking at" answer, and it costs no extra container. */
+.gfile.open {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface-bright);
+    border-bottom: 1px solid var(--border-strong);
+    font-weight: 600;
+}
+.gcaret {
+    flex: 0 0 0.8em;
+    color: var(--text-muted);
+    transition: transform 0.12s ease;
+}
+.gfile.open .gcaret { transform: rotate(90deg); color: var(--accent); }
+.gcode {
+    flex: 0 0 1.1em;
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 0.62rem;
+}
+.gname { flex: 1 1 auto; min-width: 0; word-break: break-all; color: var(--text); }
+.gopen {
+    flex: 0 0 auto;
+    padding: 0 2px;
+    color: var(--text-muted);
+    opacity: 0;
+}
+.gfile:hover .gopen { opacity: 1; }
+.gopen:hover { color: var(--accent); }
+@media (hover: none) { .gopen { opacity: 0.5; padding: 0 8px; } }
+
+.git-stat { flex: 0 0 auto; font-size: 0.62rem; white-space: nowrap; }
+.dstat-add { color: #2f6f4f; font-weight: 700; }
+.dstat-del { color: #9d0006; font-weight: 700; }
+
+/* The expanded hunks. Flush — no border, no radius, no padding of its own. */
+.gbody { display: none; font-family: var(--font-mono); font-size: 0.68rem; line-height: 1.45; }
+.gbody.shown { display: block; }
+
+/* Hunk separator: a band, so the eye reads it as a divider and not as code. */
+.dhunk {
+    background: #ece3cf;
+    color: var(--text-dim);
+    padding: 2px 8px;
+    font-size: 0.62rem;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Rows. Filled backgrounds plus a coloured left edge — the edge is what you
+   follow when scrolling fast, before reading a single word. */
+.dl { display: flex; align-items: baseline; border-left: 3px solid transparent; }
+.dl-no {
+    flex: 0 0 2.9em;
+    text-align: right;
+    padding-right: 0.5em;
+    color: var(--text-muted);
+    font-size: 0.62rem;
+    -webkit-user-select: none;
+    user-select: none;
+}
+.dl-sign { flex: 0 0 1em; text-align: center; font-weight: 700; }
+.dl-txt { flex: 1 1 auto; white-space: pre-wrap; word-break: break-word; padding-right: 6px; }
+.dl-add { background: #dcf0dc; border-left-color: #4f8f5f; }
+.dl-add .dl-sign { color: #2f6f4f; }
+.dl-del { background: #f7dcdc; border-left-color: #c05050; }
+.dl-del .dl-sign { color: #9d0006; }
+.dl-ctx { color: var(--text-dim); }
+.dl-meta { background: var(--surface); color: var(--accent); font-style: italic; }
+
+/* ── Polish pass (2026-10-02) ──────────────────────────────────────────────
+   Rules of the house, so this stays smooth as it grows:
+
+   1. Animate ONLY transform and opacity. Those are composited — the browser
+      hands them to the GPU and never re-lays-out the page. Transitioning
+      width/height/top/left on a layout this size means a reflow per frame,
+      and a reflow here also re-columns the terminal iframe.
+   2. 120ms is the budget. Long enough to read as motion, short enough that it
+      never stands between a click and the content.
+   3. Big lists get content-visibility. A 3,600-line diff is ~14,000 DOM nodes;
+      without it the browser lays out every row before painting the first one.
+   4. Respect prefers-reduced-motion. */
+
+.rail-row, .gfile, .proj-cell, .fv-cell, #git-bar, .rail-ins, .gopen {
+    transition: background-color 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+/* The press feedback is a transform, so it costs nothing. */
+.rail-row:active, .gfile:active, .proj-cell:active { transform: scale(0.995); }
+.fv-cell:active { transform: scale(0.98); }
+.gcaret { transition: transform 120ms ease; }
+
+/* Keyboard reachability — this is a desktop app now, so focus has to be
+   visible. outline does not affect layout, unlike a border. */
+.rail-row:focus-visible, .gfile:focus-visible, .proj-cell:focus-visible,
+.fv-cell:focus-visible, #git-bar:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+/* Long lists: skip layout for rows that are off screen. contain-intrinsic-size
+   gives the scrollbar a believable estimate so it does not jump around while
+   you scroll. */
+.gbody .dl, .fv-code .fv-line {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 1.45em;
+}
+/* The gallery is images, which are the expensive case — these also carry
+   loading="lazy" in the markup. */
+.fv-cell { content-visibility: auto; contain-intrinsic-size: auto 150px; }
+
+/* Scrollbars that match the theme instead of the OS default. */
+#sheet-body, #rail-list, .fv-code { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+#sheet-body::-webkit-scrollbar, #rail-list::-webkit-scrollbar { width: 9px; height: 9px; }
+#sheet-body::-webkit-scrollbar-thumb, #rail-list::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 5px;
+}
+#sheet-body::-webkit-scrollbar-track, #rail-list::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+    .rail-row, .gfile, .proj-cell, .fv-cell, #git-bar, .gcaret, .rail-ins, .gopen {
+        transition: none;
+    }
+    .rail-row:active, .gfile:active, .proj-cell:active, .fv-cell:active { transform: none; }
+}
+
+/* ── Git panel, with room to breathe ──────────────────────────────────────
+   Patrick asked for more space here and for it to be "in tune with GitHub",
+   so the strip carries four lines now: state, last commit, what is unpushed,
+   and the GitHub line (open PRs + latest CI, via the gh CLI). */
+@media (min-width: 1100px) {
+    #git-bar { font-size: 0.66rem; padding: 8px 9px; max-height: 40vh; overflow-y: auto; }
+}
+.gb-sha { color: var(--text-dim); font-weight: 700; }
+.gb-push {
+    margin-top: 5px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: var(--accent-dim);
+    color: var(--accent);
+    font-weight: 700;
+}
+.gb-gh {
+    margin-top: 5px;
+    padding-top: 5px;
+    border-top: 1px solid var(--border);
+    cursor: pointer;
+}
+.gb-gh:hover { color: var(--accent); }
+.gb-pr { color: var(--accent); font-weight: 600; }
+.gb-ci-ok  { color: var(--success); font-weight: 600; }
+.gb-ci-bad { color: var(--danger); font-weight: 700; }
+.gb-ci-run { color: var(--warning); font-weight: 600; }
+
+/* "Make this a repo" — the offer for the 107 folders that have none. */
+.gb-init {
+    margin-top: 5px;
+    padding: 4px 6px;
+    border: 1px dashed var(--border-strong);
+    border-radius: 4px;
+    text-align: center;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.gb-init:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }

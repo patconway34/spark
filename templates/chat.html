@@ -4,7 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
     <title>Spark</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=6.0">
+
+    <!-- PWA: makes Spark installable so it launches with NO browser chrome.
+         display:fullscreen in the manifest drops both the URL bar and the
+         Android status bar. Change it to "standalone" if you want the clock and
+         battery back. Install from Chrome's ⋮ menu → "Install app" — a plain
+         "Add to home screen" shortcut still opens inside Chrome. -->
+    <!-- crossorigin="use-credentials" is REQUIRED here, not optional polish.
+         Chrome fetches a manifest with credentials OMITTED by default, and it
+         also probes start_url ("/") the same way. Spark gates "/" behind
+         SPARK_TOKEN, so both arrive tokenless, "/" answers 401, and Chrome
+         quietly decides the app is not installable — no error, no prompt, every
+         other criterion passing. This attribute makes Chrome send the cookie. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+    <meta name="theme-color" content="#3c3836">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Spark">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=8.0">
     <!-- UI colors from theme.json (overrides style.css :root). Edit theme.json,
          restart the Spark app, and refresh to recolor the chrome. -->
     <style>
@@ -27,6 +48,33 @@
 </head>
 <body tabindex="-1">
 
+<!-- File rail: tap-to-insert path picker. Overlay, not a layout column — see
+     the note in style.css about why shrinking the terminal is a bad idea. -->
+<!-- Diff / file preview. Full-screen dismissible sheet; see style.css for why
+     this is not a side column. -->
+<!-- Drag handle between the viewer and the terminal, plus the guide line that
+     follows the cursor while dragging. Desktop-only (CSS hides them below the
+     docked breakpoint). -->
+<div id="splitter-rail" class="splitter" style="display:none;"></div>
+<div id="splitter" class="splitter" style="display:none;"></div>
+<div id="split-guide"></div>
+
+<div id="sheet">
+    <div id="sheet-bar">
+        <div id="sheet-title"></div>
+        <button id="sheet-close" class="btn key-btn" onclick="closeSheet()" style="flex:0 0 auto;height:30px;padding:0 12px;font-size:0.65rem;">Close</button>
+    </div>
+    <div id="sheet-body"></div>
+</div>
+
+<div id="file-rail">
+    <div id="rail-head">/dev</div>
+    <div id="rail-list"></div>
+    <!-- Git strip, pinned to the bottom of the file pane: branch, ahead/behind,
+         what is uncommitted, last commit. Tap it for the full Changes view. -->
+    <div id="git-bar" onclick="showGit()" title="Open Changes"></div>
+</div>
+
 {% for s in sessions %}
 <div class="terminal-wrap{% if s.id != session.id %} term-hidden{% endif %}" id="wrap-{{ s.id }}">
 <iframe id="term-{{ s.id }}" class="terminal-frame" data-local="{{ s.local_url }}" data-remote="{{ s.remote_url }}" data-bg="{{ s.bg }}"></iframe>
@@ -34,36 +82,84 @@
 {% endfor %}
 
 <div id="controls">
-    <!-- Hamburger menu -->
-    <div id="hamburger-panel" style="display:none; flex-wrap:wrap; gap:0.2rem; padding:0.2rem 0.4rem; justify-content:center;">
-        <!-- Claude Code commands -->
-        <button class="btn key-btn ham-yes" onclick="sendCommand('yes')" style="height:28px;font-size:0.6rem;font-weight:600;">Yes</button>
-        <button class="btn key-btn ham-no" onclick="sendCommand('no')" style="height:28px;font-size:0.6rem;font-weight:600;">No</button>
-        <button class="btn key-btn" onclick="sendCommand('/new')" style="height:28px;font-size:0.6rem;font-weight:600;">/new</button>
-        <button class="btn key-btn" onclick="sendCommand('/compact')" style="height:28px;font-size:0.6rem;font-weight:600;">/compact</button>
-        <!-- Model switch (sends /model — switches model without running the chat) -->
-        <button class="btn key-btn" onclick="sendCommand('/model claude-fable-5-1')" style="height:28px;font-size:0.6rem;font-weight:600;">→ Fable 5.1</button>
-        <button class="btn key-btn" onclick="sendCommand('/model claude-opus-5')" style="height:28px;font-size:0.6rem;font-weight:600;">→ Opus 5</button>
-        <!-- Navigation -->
-        <button class="btn key-btn" onclick="sendKey('Tab')" style="height:28px;font-size:0.6rem;">Tab</button>
-        <button class="btn key-btn" onclick="sendKey('BTab')" style="height:28px;font-size:0.6rem;">⇧Tab</button>
-        <button class="btn key-btn" onclick="sendKey('Up')" style="height:28px;font-size:0.6rem;">▲</button>
-        <button class="btn key-btn" onclick="sendKey('Down')" style="height:28px;font-size:0.6rem;">▼</button>
-        <!-- Control -->
-        <button class="btn key-btn" onclick="sendKey('C-u')" style="height:28px;font-size:0.6rem;">Clear</button>
-        <button class="btn key-btn" onclick="sendKey('C-c')" style="height:28px;font-size:0.6rem;">^C</button>
-        <button class="btn key-btn" onclick="sendKey('C-z')" style="height:28px;font-size:0.6rem;">^Z</button>
-        <!-- Numbered selections -->
-        <button class="btn key-btn" onclick="sendCommand('1')" style="height:28px;font-size:0.6rem;">1</button>
-        <button class="btn key-btn" onclick="sendCommand('2')" style="height:28px;font-size:0.6rem;">2</button>
-        <button class="btn key-btn" onclick="sendCommand('3')" style="height:28px;font-size:0.6rem;">3</button>
-        <!-- Screen capture + notify -->
-        <button class="btn key-btn" onclick="saveScreenshot()" style="height:28px;font-size:0.6rem;">📷 Save</button>
-        <button class="btn key-btn" onclick="copyScreen()" style="height:28px;font-size:0.6rem;">📋 Copy</button>
-        <button class="btn key-btn" onclick="textMe()" style="height:28px;font-size:0.6rem;">📲 Text</button>
-        <button class="btn key-btn" onclick="playMe()" style="height:28px;font-size:0.6rem;">🔊 Play</button>
-        <button class="btn key-btn" onclick="listenMe()" style="height:28px;font-size:0.6rem;">🎧 Listen</button>
-        <button id="text-size-btn" class="btn key-btn" onclick="toggleTextSize()" style="height:28px;font-size:0.6rem;">🔍 Big Text</button>
+    <!-- Hamburger menu — grouped, 36px targets. All styling is in style.css
+         (#hamburger-panel), NOT inline: this used to be 24 copies of the same
+         style="" string, so every size tweak meant 24 edits. -->
+    <div id="hamburger-panel" style="display:none;">
+
+        <div class="ham-group">
+            <div class="ham-label">Answer</div>
+            <div class="ham-row">
+                <button class="btn key-btn ham-yes" onclick="sendCommand('yes')">Yes</button>
+                <button class="btn key-btn ham-no" onclick="sendCommand('no')">No</button>
+            </div>
+        </div>
+
+        <div class="ham-group">
+            <div class="ham-label">Session</div>
+            <div class="ham-row">
+                <button class="btn key-btn" onclick="sendCommand('/new')">/new</button>
+                <button class="btn key-btn" onclick="sendCommand('/compact')">/compact</button>
+            </div>
+            {% if model_buttons %}
+            <div class="ham-row">
+                {% for b in model_buttons %}
+                <button class="btn key-btn" onclick="sendCommand('{{ b.command }}')">{{ b.label }}</button>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="ham-group">
+            <div class="ham-label">Keys</div>
+            <div class="ham-row">
+                <button class="btn key-btn" onclick="sendKey('Tab')">Tab</button>
+                <button class="btn key-btn" onclick="sendKey('BTab')">&#8679;Tab</button>
+                <button class="btn key-btn" onclick="sendKey('Up')">&#9650;</button>
+                <button class="btn key-btn" onclick="sendKey('Down')">&#9660;</button>
+            </div>
+            <div class="ham-row">
+                <button class="btn key-btn" onclick="sendKey('C-u')">Clear</button>
+                <button class="btn key-btn" onclick="sendKey('C-c')">^C</button>
+                <button class="btn key-btn" onclick="sendKey('C-z')">^Z</button>
+            </div>
+            <div class="ham-row">
+                <button class="btn key-btn" onclick="sendCommand('1')">1</button>
+                <button class="btn key-btn" onclick="sendCommand('2')">2</button>
+                <button class="btn key-btn" onclick="sendCommand('3')">3</button>
+            </div>
+        </div>
+
+        <div class="ham-group">
+            <div class="ham-label">Voice</div>
+            <div class="ham-row">
+                <button class="btn key-btn" onclick="textMe()">&#128242; Text</button>
+                <button class="btn key-btn" onclick="playMe()">&#128266; Play</button>
+                <button class="btn key-btn" onclick="listenMe()">&#127911; Listen</button>
+            </div>
+        </div>
+
+        <div class="ham-group">
+            <div class="ham-label">Dev</div>
+            <div class="ham-row">
+                <button id="rail-btn" class="btn key-btn" onclick="toggleRail()">&#128193; Files</button>
+                <button class="btn key-btn" onclick="showGit()">&#9095; Changes</button>
+                <button class="btn key-btn" onclick="showCharts()">&#128202; Charts</button>
+            </div>
+            <div class="ham-row">
+                <button class="btn key-btn" onclick="saveScreenshot()">&#128247; Save</button>
+                <button class="btn key-btn" onclick="copyScreen()">&#128203; Copy</button>
+            </div>
+        </div>
+
+        <div class="ham-group">
+            <div class="ham-label">View</div>
+            <div class="ham-row">
+                <button id="text-size-btn" class="btn key-btn" onclick="toggleTextSize()">&#128269; Big Text</button>
+                <button class="btn key-btn" onclick="window.location='/config'">&#9881; Config</button>
+            </div>
+        </div>
+
     </div>
 
     <!-- Terminal tabs — one solid-colored button per terminal; tap or swipe to flip -->
@@ -88,8 +184,12 @@
         <button class="btn big-btn btn-enter" onclick="pressEnter()" style="flex:1;height:42px;">ENTER</button>
     </div>
     <!-- Bottom buffer to keep the controls above the Android gesture/nav bar.
-         Intentional — do NOT trim this (confirmed needed on Patrick's Android). -->
-    <div style="height:60px;"></div>
+         Intentional — do NOT trim this (confirmed needed on Patrick's Android).
+         2026-09-30: height moved to #bottom-buffer in style.css so it can shrink
+         when UNFOLDED, where the nav bar isn't eating it. The folded value is
+         still exactly 60px — the "do not trim" warning above applies to the
+         folded case and is preserved. -->
+    <div id="bottom-buffer"></div>
 </div>
 
 <script>
@@ -210,20 +310,59 @@ function unloadInactiveTerminals() {
 }
 loadActiveTerminal();
 
-// With only 3 terminals, warm them ALL a moment after load so every switch is an
-// instant visibility flip (never a cold reload). MAX_LOADED (>= 3) keeps them live.
-function preloadAllTerminals() {
-    document.querySelectorAll('.terminal-wrap').forEach(w => {
-        const f = w.querySelector('.terminal-frame');
+// Warm the ACTIVE terminal and its nearest neighbours — never more than
+// MAX_LOADED of them.
+//
+// This used to warm EVERY terminal ("with only 3 terminals, warm them ALL"),
+// written when there were three. At seven that booted seven websockets and
+// seven xterm instances on a budget of three, and unloadInactiveTerminals then
+// blanked four of them right back. Worse, _markLoaded prepends, so walking the
+// DOM front-to-back left _loadedOrder holding the LAST three terminals in DOM
+// order — the warm set was pinned to tabs 5-7 no matter which tab you were on,
+// so every ±1 switch from anywhere else was a cold load.
+//
+// You navigate with left/right (D-pad, swipe, shift+F3/F4), so ±1 is nearly all
+// of your movement. Warming active/+1/-1 spends the same three-iframe budget on
+// the terminals you are actually about to reach.
+function preloadNearbyTerminals() {
+    const wraps = Array.from(document.querySelectorAll('.terminal-wrap'));
+    if (!wraps.length) return;
+    const idOf = w => w.id.replace('wrap-', '');
+    let idx = wraps.findIndex(w => idOf(w) === ACTIVE_SESSION);
+    if (idx < 0) idx = 0;
+    // Active first, then alternating neighbours: idx, +1, -1, +2, -2, ...
+    const cap = Math.min(MAX_LOADED, wraps.length);
+    const want = [];
+    for (let d = 0; want.length < cap; d++) {
+        const step = d === 0 ? [idx]
+            : [(idx + d) % wraps.length, (idx - d + wraps.length) % wraps.length];
+        for (const j of step) {
+            if (want.length < cap && !want.includes(j)) want.push(j);
+        }
+    }
+    // Mark in reverse so the active terminal is marked LAST and therefore lands
+    // at the front of _loadedOrder (_markLoaded prepends) — it must never be the
+    // one that falls out of the keep set.
+    want.slice().reverse().forEach(i => _markLoaded(idOf(wraps[i])));
+    want.forEach(i => {
+        const f = wraps[i].querySelector('.terminal-frame');
         if (!f) return;
-        _markLoaded(w.id.replace('wrap-', ''));
         if (!f.src || f.src.startsWith('about:')) {
             f.src = _frameUrl(f);
             f.addEventListener('load', () => _onFrameLoad(f), { once: true });
         }
     });
+    unloadInactiveTerminals();
 }
-setTimeout(preloadAllTerminals, 500);
+setTimeout(preloadNearbyTerminals, 500);
+
+// Re-warm after a switch so ±1 from the NEW tab is hot too. Debounced: a fast
+// swipe run would otherwise load every terminal it passes through.
+let _warmTimer = null;
+function scheduleNeighbourWarm() {
+    clearTimeout(_warmTimer);
+    _warmTimer = setTimeout(preloadNearbyTerminals, 400);
+}
 
 // Mobile Chrome freezes/discards backgrounded tabs; a bfcache restore brings
 // the page back WITHOUT re-running this script, leaving iframes blank (white).
@@ -295,7 +434,7 @@ async function toggleMic(sendAfter = false) {
                     await fetch('/api/paste-text', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text, session: ACTIVE_SESSION})});
                     if (sendAfter) {
                         await sendKey('Enter');
-                        setStatus('Sent: ' + text.slice(0, 60));
+                        setStatus('Sent');
                     } else {
                         setStatus('Pasted — mic again or hit ENTER');
                     }
@@ -345,7 +484,7 @@ function sendTyped() {
     if (!text) return;
     sendCommand(text);
     input.value = '';
-    setStatus('Sent: ' + text);
+    setStatus('Sent');
 }
 document.addEventListener('DOMContentLoaded', () => {
     const input = document.getElementById('type-bar');
@@ -390,6 +529,38 @@ if (_debugMode) {
     // seconds late (or never), so the banner would never appear.
     setTimeout(() => setStatus('KEY DEBUG ON — press buttons, nothing else will fire'), 0);
 }
+
+// --- PWA registration + silent environment log ---
+// Registers the service worker (see /sw.js in app.py) and records, once per
+// load, whether Spark is running as the INSTALLED app or as a browser tab.
+//
+// Log-only on purpose. The toast version of this was scaffolding for the
+// 2026-09-30 install work and is gone; the log line stays because the two modes
+// get different bottom padding (see the display-mode block in style.css), so
+// "which mode was I in?" is the first question worth answering if the spacing
+// ever looks wrong again. Nothing here is user-visible.
+async function _logPwaEnv() {
+    const mode = window.matchMedia('(display-mode: fullscreen)').matches ? 'fullscreen'
+               : window.matchMedia('(display-mode: standalone)').matches ? 'standalone'
+               : 'browser-tab';
+    let sw = 'sw:none';
+    try {
+        await navigator.serviceWorker.register('/sw.js');
+        await navigator.serviceWorker.ready;
+        sw = 'sw:OK' + (navigator.serviceWorker.controller ? '+controlling' : '+NOT-controlling');
+    } catch (e) {
+        sw = 'sw:FAIL(' + e.message + ')';
+    }
+    const pad = getComputedStyle(document.documentElement)
+                    .getPropertyValue('--safe-bottom').trim() || '0px';
+    fetch('/api/log', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({msg: `PWA mode:${mode} | ${sw} | width:${window.innerWidth} | pad:${pad}`})
+    }).catch(()=>{});
+}
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => { _logPwaEnv(); });
+}
+
 document.addEventListener('keydown', (e) => {
     if (_debugMode) {
         const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta'].filter(Boolean).join('+');
@@ -412,35 +583,75 @@ document.addEventListener('keydown', (e) => {
     // --- Mic toggle (desktop) ---
     if (e.ctrlKey && e.code === 'KeyM') { e.preventDefault(); toggleMic(); return; }
 
-    // --- 8BitDo Profile 2, shifted layer (Shift+F-key combos) ---
-    // REMAPPED 2026-09-29 (Patrick). The thumb now lives on the face buttons:
-    // mic, send, and terminal left/right are the four things done constantly,
-    // so they moved off the d-pad onto A/Y/X/B where the thumb already rests.
-    // The d-pad took over the read-back jobs, which are occasional.
-    // The controller itself was NOT touched - every button still sends the key
-    // it always sent; only the action behind it changed.
-    if (e.shiftKey && e.key === 'F1') { e.preventDefault(); sendCommand('/new'); setStatus('/new'); return; }   // P2 ★  — /new (fresh conversation)
-    if (e.shiftKey && e.key === 'F2') { e.preventDefault(); toggleMic(); return; }                             // P2 A  — Mic on/off
-    if (e.shiftKey && e.key === 'F3') { e.preventDefault(); switchSessionByOffset(1); return; }                 // P2 B  — Terminal right
-    if (e.shiftKey && e.key === 'F4') { e.preventDefault(); switchSessionByOffset(-1); return; }                // P2 X  — Terminal left
-    if (e.shiftKey && e.key === 'F5') { e.preventDefault(); sendKey('Escape'); return; }                        // P2 R  — Escape
-    // CLEAR MEANS WHAT THE MENU'S CLEAR MEANS: C-u, wipe the line you have
-    // typed but not sent. Shipped as C-l (clear screen) first - wrong: Patrick
-    // reached for R2 expecting the hamburger's behaviour, which is the one he
-    // already knows. Same key as the menu button, so the two cannot disagree.
-    if (e.shiftKey && e.key === 'F7') { e.preventDefault(); sendKey('C-u'); return; }                           // P2 R2 — Clear the typed line (same as menu Clear)
-    if (e.shiftKey && e.key === 'F8') { e.preventDefault(); pressEnter(); return; }                             // P2 Y  — Enter / send
+    // --- 8BitDo Profile 2 — REMAPPED 2026-10-01 (Patrick), new controller ---
+    // Patrick replaced the controller: D-pad Down (F7) now fires (the old unit
+    // had a dead micro switch), and R2 genuinely sends Shift+F7 — on the old
+    // unit R2 emitted a bare ShiftLeft and nothing else, which is why Clear sat
+    // on an unreachable binding for days. Probed, not assumed.
+    //
+    // This restores the pre-2026-09-29 feel: the d-pad drives the things done
+    // constantly (mic, send, terminal left/right), face buttons hold the
+    // occasional jobs. Every entry below is one physical button.
+    //
+    // PHYSICAL BUTTON -> KEY -> ACTION
+    //   D-pad Left   F1         Mic on/off
+    //   D-pad Right  F2         Enter / send
+    //   D-pad Up     F9         Terminal right
+    //   D-pad Down   Shift+E    Terminal left   (NOT F7 — see note below)
+    //   L            F4         Escape
+    //   L2           F8         Clear typed line (C-u)
+    //   "-"          F12        Page up
+    //   "+"          F10        Page down
+    //   *            Shift+F1   /new
+    //   A            Shift+F2   Refresh page
+    //   B            Shift+F3   Play/Pause read-back
+    //   X            Shift+F4   Tab
+    //   R            Shift+F5   Listen (full reply read aloud)
+    //   R2           Shift+W    Big text / car mode  (NOT Shift+F7 — see note)
+    //   Y            Shift+F8   Voice summary
+    //
+    // Any key must be F1-F12 or Shift+F1-F12: Android delivers nothing above
+    // F12 to the browser (F13+ arrive as "Unidentified"). F6 stays unbound —
+    // holding the controller's home key powers it off and spams F6.
 
-    // --- 8BitDo Profile 2 (Android only delivers F1-F12; F13+ = Unidentified) ---
+    // --- Shifted layer (face buttons + shoulders) ---
+    if (e.shiftKey && e.key === 'F1') { e.preventDefault(); sendCommand('/new'); setStatus('/new'); return; }  // *  — /new
+    if (e.shiftKey && e.key === 'F2') { e.preventDefault(); refreshPage(); return; }                           // A  — Refresh page
+    if (e.shiftKey && e.key === 'F3') { e.preventDefault(); listenPlayPause(); return; }                       // B  — Play/Pause read-back
+    if (e.shiftKey && e.key === 'F4') { e.preventDefault(); sendKey('Tab'); return; }                           // X  — Tab
+    if (e.shiftKey && e.key === 'F5') { e.preventDefault(); listenMe(); return; }                               // R  — Listen (full read)
+    // R2 sends Shift+W, not Shift+F7. PROBED 2026-10-01: F7 has now failed
+    // twice on this hardware — base F7 (D-pad Down) never arrived, and Shift+F7
+    // from R2 never arrived either, on two different controllers. Shift+letter
+    // combos reach the browser reliably, F7 evidently does not, so both of the
+    // ex-F7 buttons are letters now. Probe logged `Shift+W [KeyW #87]`.
+    // e.code again, so case and layout cannot break it.
+    if (e.shiftKey && e.code === 'KeyW') { e.preventDefault(); toggleTextSize(); return; }  // R2 — Big text / car mode
+    if (e.shiftKey && e.key === 'F7') { e.preventDefault(); toggleTextSize(); return; }     // (Shift+F7 kept as a fallback)
+    if (e.shiftKey && e.key === 'F8') { e.preventDefault(); summaryMe(); return; }                               // Y  — Voice summary
+    // D-pad Down sends Shift+E, not F7. PROBED 2026-10-01: on both the old and
+    // the new controller, D-pad Down produced NO keydown at all — the browser
+    // never saw it, so the long-standing "broken micro switch" note in this file
+    // was wrong; the button simply was not mapped. Patrick assigned Shift+E in
+    // the 8BitDo app and the probe logged `Shift+E [KeyE #69]`.
+    // Matched on e.code, not e.key: with Shift held, e.key is the uppercase "E",
+    // and e.code is immune to case and keyboard layout.
+    // Being a letter, this one types into the type-bar if that has focus — the
+    // handler bails out while typing, so that is expected, not a bug.
+    if (e.shiftKey && e.code === 'KeyE') { e.preventDefault(); switchSessionByOffset(-1); return; }  // D-pad Down — Terminal left
+
+    // --- Base layer (d-pad + L/L2 + volume rocker) ---
     if (e.shiftKey || e.ctrlKey || e.altKey) return;  // base layer = unmodified keys only
-    if (e.key === 'F1') { e.preventDefault(); refreshPage(); return; }              // P2 D-pad Left — Refresh the page
-    if (e.key === 'F2') { e.preventDefault(); summaryMe(); return; }               // P2 D-pad Right — Voice summary
-    if (e.key === 'F9') { e.preventDefault(); listenPlayPause(); return; }         // P2 D-pad Up — Play/Pause read-back
-    // F7 (D-pad Down) unbound — broken micro switch, never fires
-    if (e.key === 'F4') { e.preventDefault(); sendKey('Tab'); return; }            // P2 L — Tab (the one thing the mic cannot do)
-    if (e.key === 'F8') { e.preventDefault(); toggleTextSize(); return; }          // P2 L2 — Big/Normal text toggle
-    if (e.key === 'F10') { e.preventDefault(); scrollTerminal('up'); return; }     // P2 "+" — page up
-    if (e.key === 'F12') { e.preventDefault(); scrollTerminal('down'); return; }   // P2 "−" — page down
+    if (e.key === 'F1')  { e.preventDefault(); toggleMic(); return; }                       // D-pad Left  — Mic
+    if (e.key === 'F2')  { e.preventDefault(); pressEnter(); return; }                      // D-pad Right — Enter
+    if (e.key === 'F9')  { e.preventDefault(); switchSessionByOffset(1); return; }          // D-pad Up    — Terminal right
+    if (e.key === 'F7')  { e.preventDefault(); switchSessionByOffset(-1); return; }         // (F7 kept as a fallback — the controller sends Shift+E instead)
+    if (e.key === 'F4')  { e.preventDefault(); sendKey('Escape'); return; }                 // L           — Escape
+    // Clear is C-u, the same key the hamburger's Clear sends, so the button and
+    // the menu can never disagree about what "clear" means.
+    if (e.key === 'F8')  { e.preventDefault(); sendKey('C-u'); return; }                    // L2          — Clear typed line
+    if (e.key === 'F12') { e.preventDefault(); scrollTerminal('up'); return; }              // "-"         — Page up
+    if (e.key === 'F10') { e.preventDefault(); scrollTerminal('down'); return; }            // "+"         — Page down
 
     // --- Send ---
     if (e.key === 'Enter' && !e.ctrlKey) { e.preventDefault(); pressEnter(); return; }  // 8BitDo B
@@ -584,6 +795,7 @@ function _startListen(mode, icon) {
         return;
     }
     _lastListen = now;
+    const _pressT = now;   // TIMING: true end-to-end, press -> audio playing
     // ALWAYS start a brand-new read-back. Never replay or toggle —
     // that's what listenPlayPause() (B button) is for. Both modes share the
     // same _listenPlayer, so B pauses/resumes whichever one is playing.
@@ -603,16 +815,27 @@ function _startListen(mode, icon) {
                 fetch('/api/text-status/' + d.job).then(r => r.json()).then(s => {
                     if (s.status === 'ready') {
                         clearInterval(poll);
+                        const _readyT = ((Date.now() - _pressT) / 1000).toFixed(2);
                         _listenPlayer.src = '/api/listen-audio/' + d.job;
                         _listenPlayer.play()
-                            .then(() => setStatus('Playing...'))
+                            .then(() => {
+                                const _playT = ((Date.now() - _pressT) / 1000).toFixed(2);
+                                setStatus('Playing (' + _playT + 's)');
+                                fetch('/api/log', {method:'POST',
+                                    headers:{'Content-Type':'application/json'},
+                                    body: JSON.stringify({msg:
+                                        `LISTEN_T job=${d.job} CLIENT ready=${_readyT}s `
+                                      + `playing=${_playT}s <- true end-to-end`})
+                                }).catch(()=>{});
+                            })
                             .catch(() => setStatus('Ready — tap ' + icon + ' to play'));
                     }
                     else if (s.status === 'failed') { clearInterval(poll); setStatus('Failed'); }
                     else if (s.status === 'timeout') { clearInterval(poll); setStatus('Timed out'); }
-                    else if (checks >= 30) { clearInterval(poll); setStatus('Still processing...'); }
+                    else if (checks >= 150) { clearInterval(poll); setStatus('Still processing...'); }
                 }).catch(() => {});
-            }, 2000);
+            }, 400);   // was 2000ms: up to 2s of dead air after the mp3 was ready.
+                       // 150 x 400ms keeps the same ~60s ceiling as 30 x 2000ms.
         }))
         .catch(() => setStatus('Failed: server error'));
 }
@@ -698,6 +921,14 @@ function reloadTerminal() {
 // body.big-text lays the iframes out at 62.5% size (xterm re-fits: fewer
 // columns, text rewraps) and scales them 1.6x to fill the screen.
 let _largeText = false;
+// Big text is a font size and nothing more.
+//
+// 2026-10-01: it used to broadcast a "keep answers short" instruction to all
+// terminals on every toggle. Removed at Patrick's request — he would rather say
+// that himself, per chat, when he actually wants it. The toggle typed into seven
+// live terminals, which also meant it landed in whatever each one was doing.
+// 2026-10-02: tried again, scoped to the active terminal only. Patrick said no
+// again — big text is a VISUAL toggle and stays one. Do not re-add the send.
 function toggleTextSize() {
     _largeText = !_largeText;
     document.body.classList.toggle('big-text', _largeText);
@@ -705,6 +936,1041 @@ function toggleTextSize() {
     if (btn) btn.textContent = _largeText ? '🔍 Normal Text' : '🔍 Big Text';
     setStatus(_largeText ? 'Big text' : 'Normal text');
 }
+
+// --- File rail ------------------------------------------------------------
+// Tap a folder to walk into it; tap a file and its path lands in the type-bar,
+// which is the entire reason this exists — dictating a path by voice is the
+// worst friction in Spark, and tapping one is instant.
+// Paths inserted are relative to /mnt/c/dev, matching how the terminals' cwd is
+// usually set, so "spark/templates/chat.html" is what Claude Code expects.
+let _railPath = null;        // where the rail is RIGHT NOW (may be a subfolder)
+let _railKind = 'code';      // 'code' | 'info' | 'charts' — drives the pane
+// The active terminal's workspace: its folder, the file it had open, and which
+// view the middle pane was showing. The rail is this FOLDER's explorer — it
+// does not walk above it, which is the difference between a file browser and a
+// project pane. Change projects deliberately, through the picker.
+let _ws = {folder: '', file: '', view: ''};
+
+async function wsLoad(sid) {
+    try {
+        const r = await fetch('/api/workspace?session=' + encodeURIComponent(sid));
+        _ws = await r.json();
+    } catch (e) { _ws = {folder: '', file: '', view: ''}; }
+    return _ws;
+}
+
+// Point the whole left-and-middle at the active terminal's workspace: its
+// folder in the rail, its open file (or its kind's default view) in the pane.
+//
+// 2026-10-02: this lived inside syncSession(), which only runs on
+// visibilitychange — so switching tabs changed the terminal and nothing else,
+// and the panes only caught up if you alt-tabbed away and back. Both callers
+// share it now; there is exactly one place that knows how to follow a tab.
+async function workspaceFollow() {
+    if (!DOCKED() && !document.body.classList.contains('rail-open')) return;
+    await wsLoad(ACTIVE_SESSION);
+    await loadRail(_ws.folder || null);
+    // Always the diff on a tab switch. The workspace still REMEMBERS the file
+    // you had open (it is one click away in the rail), but landing on a tab
+    // should answer "what changed here", which is the question you have when
+    // you switch to a terminal an agent has been working in.
+    paneDefault();
+}
+
+// Partial save — only the keys passed are written, so storing the open file
+// cannot clobber the folder.
+function wsSave(patch) {
+    Object.assign(_ws, patch);
+    fetch('/api/workspace', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({session: ACTIVE_SESSION, ...patch}),
+    }).catch(() => {});
+}
+
+async function loadRail(path) {
+    const q = (path === null || path === undefined)
+        ? '?session=' + encodeURIComponent(ACTIVE_SESSION)
+        : '?path=' + encodeURIComponent(path);
+    let d;
+    try {
+        const r = await fetch('/api/files' + q);
+        d = await r.json();
+    } catch (e) {
+        setStatus('Files unavailable');
+        return;
+    }
+    _railPath = d.path;
+    _railKind = d.kind || 'code';
+    // The rail header carries the kind, because the kind decides what the
+    // middle pane shows: a code folder has diffs, a chart folder has pictures.
+    const KIND_ICON = {code: '⌨️', info: '📄', charts: '📊'};
+    loadGitBar();
+    const head = document.getElementById('rail-head');
+    head.textContent = (KIND_ICON[_railKind] || '') + ' ' + (d.path || '/dev');
+    head.title = 'Change project';
+    head.onclick = showProjects;
+    const list = document.getElementById('rail-list');
+    list.innerHTML = '';
+
+    // One row = [icon][name][+]. The icon is a fixed-width column so the names
+    // line up into a readable left edge instead of a ragged one.
+    const row = (icon, label, cls, fn, insertRel) => {
+        const el = document.createElement('div');
+        el.className = 'rail-row ' + cls;
+        const ic = document.createElement('span');
+        ic.className = 'rail-icon';
+        ic.textContent = icon;
+        const nm = document.createElement('span');
+        nm.className = 'rail-name';
+        const short = midTrunc(label, 24);
+        nm.textContent = short;
+        // The full name is never destroyed — it lives on the node, so hovering
+        // or selecting a row can show all of it without a second fetch. A
+        // tooltip alone is a bad answer: slow on desktop, absent on a phone.
+        if (short !== label) {
+            nm.title = label;
+            el.onmouseenter = () => { if (!el.classList.contains('sel')) nm.textContent = label; };
+            el.onmouseleave = () => { if (!el.classList.contains('sel')) nm.textContent = short; };
+            el.dataset.full = label;
+            el.dataset.short = short;
+        }
+        el.appendChild(ic);
+        el.appendChild(nm);
+        el.onclick = () => {
+            // Selection does two jobs: it keeps the long name expanded so you
+            // can read it, and it marks which file the pane is showing.
+            list.querySelectorAll('.rail-row.sel').forEach(r => {
+                r.classList.remove('sel');
+                if (r.dataset.short) {
+                    const n = r.querySelector('.rail-name');
+                    if (n) n.textContent = r.dataset.short;
+                }
+            });
+            el.classList.add('sel');
+            if (el.dataset.full) nm.textContent = el.dataset.full;
+            fn();
+        };
+        // The rail's ORIGINAL job was putting a path in the type-bar — that is
+        // why it exists at all, and dictating a path by voice is miserable. The
+        // row tap now opens the file instead, so that job moves to its own
+        // button rather than disappearing.
+        if (insertRel) {
+            const ins = document.createElement('span');
+            ins.className = 'rail-ins';
+            ins.textContent = '+';
+            ins.title = 'Put this path in the type bar';
+            ins.onclick = (e) => { e.stopPropagation(); insertPath(insertRel); };
+            el.appendChild(ins);
+        }
+        list.appendChild(el);
+    };
+
+    // ".." stops at the workspace folder. Above that is a different project,
+    // and you change projects through the picker, not by wandering up.
+    const atTop = (d.path || '') === (_ws.folder || '');
+    if (!atTop && d.parent !== null && d.parent !== undefined) {
+        row('\u21b0', '.. up', 'rail-up', () => loadRail(d.parent), null);
+    }
+    (d.dirs || []).forEach(name => {
+        const child = d.path ? d.path + '/' + name : name;
+        row('\ud83d\udcc1', name, 'rail-dir', () => loadRail(child), child);
+    });
+    (d.files || []).forEach(name => {
+        const full = d.path ? d.path + '/' + name : name;
+        row(fileIcon(name), name, 'rail-file', () => showFile(full), full);
+    });
+}
+
+// Long names, truncated in the MIDDLE rather than the end.
+//
+// End-truncation is what most file lists do (VS Code, browsers) and it is the
+// wrong choice for this workspace. camino's filenames are prefix-grouped —
+// financial_docs_chase_bank_statement_combined_accounts.pdf,
+// financial_docs_patrick_cc_statement_sapphire_preferred.pdf — so cutting the
+// tail leaves a column of identical "financial_docs_cha…" rows. The END is
+// what distinguishes them, and the extension lives there too.
+//
+// So: keep the head for context, the tail for identity, the extension always.
+// Finder and Explorer both do this. Full name on hover, and the viewer's title
+// bar always shows the whole path anyway.
+function midTrunc(name, max) {
+    if (!name || name.length <= max) return name;
+    const dot = name.lastIndexOf('.');
+    const ext = (dot > 0 && name.length - dot <= 6) ? name.slice(dot) : '';
+    const base = ext ? name.slice(0, dot) : name;
+    const budget = max - ext.length - 1;          // -1 for the ellipsis
+    const tail = Math.max(6, Math.floor(budget * 0.45));
+    const head = Math.max(3, budget - tail);
+    return base.slice(0, head) + '\u2026' + base.slice(base.length - tail) + ext;
+}
+
+// File-type icons. Emoji, deliberately: no icon font to load, no sprite sheet,
+// works with the service worker offline, and renders on the phone and the
+// desktop identically. Keyed longest-suffix-first so ".tar.gz" can beat ".gz".
+const FILE_ICONS = [
+    ['.py', '\ud83d\udc0d'], ['.ipynb', '\ud83d\udcd3'],
+    ['.js', '\ud83d\udcdc'], ['.mjs', '\ud83d\udcdc'], ['.ts', '\ud83d\udcd8'],
+    ['.jsx', '\u269b\ufe0f'], ['.tsx', '\u269b\ufe0f'],
+    ['.html', '\ud83c\udf10'], ['.htm', '\ud83c\udf10'],
+    ['.css', '\ud83c\udfa8'], ['.scss', '\ud83c\udfa8'],
+    ['.md', '\ud83d\udcdd'], ['.txt', '\ud83d\udcc4'], ['.log', '\ud83e\uddfe'],
+    ['.json', '\u2699\ufe0f'], ['.yml', '\u2699\ufe0f'], ['.yaml', '\u2699\ufe0f'],
+    ['.toml', '\u2699\ufe0f'], ['.ini', '\u2699\ufe0f'], ['.cfg', '\u2699\ufe0f'],
+    ['.env', '\ud83d\udd11'], ['.pem', '\ud83d\udd11'], ['.key', '\ud83d\udd11'],
+    ['.csv', '\ud83d\udcca'], ['.xlsx', '\ud83d\udcca'], ['.jsonl', '\ud83d\udcca'],
+    ['.pdf', '\ud83d\udcd5'],
+    ['.png', '\ud83d\uddbc\ufe0f'], ['.jpg', '\ud83d\uddbc\ufe0f'],
+    ['.jpeg', '\ud83d\uddbc\ufe0f'], ['.gif', '\ud83d\uddbc\ufe0f'],
+    ['.svg', '\ud83d\uddbc\ufe0f'], ['.ico', '\ud83d\uddbc\ufe0f'],
+    ['.wav', '\ud83d\udd0a'], ['.mp3', '\ud83d\udd0a'], ['.onnx', '\ud83e\udde0'],
+    ['.bat', '\ud83d\udd27'], ['.sh', '\ud83d\udd27'], ['.ps1', '\ud83d\udd27'],
+    ['.sql', '\ud83d\uddc3\ufe0f'], ['.db', '\ud83d\uddc3\ufe0f'],
+    ['.sqlite', '\ud83d\uddc3\ufe0f'],
+    ['.zip', '\ud83d\udce6'], ['.gz', '\ud83d\udce6'], ['.whl', '\ud83d\udce6'],
+    ['.docx', '\ud83d\udcc3'], ['.pptx', '\ud83d\udcc3'],
+];
+
+function fileIcon(name) {
+    const n = name.toLowerCase();
+    if (n === 'dockerfile' || n === 'makefile') return '\ud83d\udd27';
+    if (n.startsWith('requirements')) return '\ud83d\udce6';
+    for (const [ext, icon] of FILE_ICONS) {
+        if (n.endsWith(ext)) return icon;
+    }
+    return '\ud83d\udcc4';
+}
+
+// Append the path to whatever is already typed, so you can dictate
+// "read this file" first and then tap the file.
+function insertPath(rel) {
+    const bar = document.getElementById('type-bar');
+    const sep = (bar.value && !bar.value.endsWith(' ')) ? ' ' : '';
+    bar.value = bar.value + sep + rel;
+    setStatus(rel);
+}
+
+// Two behaviors, one button, decided by screen width.
+// Phone / folded: the rail is a popover — rail-open shows it, nothing moves.
+// Desktop (>=1100px): the rail is DOCKED by CSS and visible from load, so the
+// button means collapse/expand instead. Matching the CSS breakpoint here keeps
+// the two halves from disagreeing about which mode the rail is in.
+const DOCKED = () => window.matchMedia('(min-width: 1100px)').matches;
+
+// --- Diff sheet + git panel ----------------------------------------------
+// Local git only — no GitHub, no network. See the note above the endpoints in
+// app.py. Reviewing what Claude just changed is the thing you cannot do from a
+// phone today, which is why this exists.
+function openSheet(title) {
+    document.getElementById('sheet-title').textContent = title;
+    document.getElementById('sheet-body').textContent = 'Loading...';
+    document.body.classList.add('sheet-open');
+}
+
+function closeSheet() {
+    // Docked, there is nothing to close — the pane is permanent (the button is
+    // hidden by CSS at this width). Only the phone's overlay sheet dismisses.
+    if (DOCKED()) return;
+    document.body.classList.remove('sheet-open');
+}
+
+// Render just the hunks of one file's diff, straight into `host`.
+//
+// No card, no border, no wrapper. 2026-10-02: the first version nested a file
+// card inside the list inside the pane — three containers for one file, each
+// with its own padding and scrollbar, and the content lost to chrome. The file
+// ROW is the container now; these rows hang directly under it.
+//
+// Line numbers come from the @@ headers; the +++/---/index plumbing is dropped
+// because the row above already says which file this is.
+function renderHunks(text, host) {
+    let oldNo = 0, newNo = 0;
+    const frag = document.createDocumentFragment();
+
+    const row = (cls, o, n, sign, txt) => {
+        const el = document.createElement('div');
+        el.className = 'dl ' + cls;
+        el.innerHTML =
+            '<span class="dl-no">' + (o || '') + '</span>' +
+            '<span class="dl-no">' + (n || '') + '</span>' +
+            '<span class="dl-sign">' + sign + '</span>' +
+            '<span class="dl-txt">' + esc(txt) + '</span>';
+        frag.appendChild(el);
+    };
+
+    text.split('\n').forEach(line => {
+        let m;
+        if (/^(diff --git|index |old mode |new mode |similarity |\+\+\+|---)/.test(line)) {
+            return;                       // the row above is the filename
+        }
+        if (/^(new file|deleted file|rename )/.test(line)) {
+            row('dl-meta', '', '', '', line);
+        } else if ((m = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/))) {
+            oldNo = parseInt(m[1], 10);
+            newNo = parseInt(m[2], 10);
+            const h = document.createElement('div');
+            h.className = 'dhunk';
+            h.textContent = 'line ' + newNo + (m[3].trim() ? '   ' + m[3].trim() : '');
+            frag.appendChild(h);
+        } else if (line.startsWith('+')) {
+            row('dl-add', '', newNo++, '+', line.slice(1));
+        } else if (line.startsWith('-')) {
+            row('dl-del', oldNo++, '', '−', line.slice(1));
+        } else if (line.startsWith('\\')) {
+            /* "\ No newline at end of file" */
+        } else {
+            row('dl-ctx', oldNo++, newNo++, ' ', line.replace(/^ /, ''));
+        }
+    });
+    host.appendChild(frag);
+}
+
+// The repo the current diff belongs to, so a filename can be resolved back to
+// a /dev-relative path.
+let _diffRepo = null;
+const joinRepo = (name) => (_diffRepo ? _diffRepo + '/' + name : name);
+
+// Changed files as an ACCORDION: every file is one row, all collapsed, click to
+// expand. Several can be open at once — the point is comparing two or three
+// files an agent touched together, not paging through them one at a time.
+// Each file's diff is fetched on first expand and kept after that.
+async function showGit() {
+    openSheet('Changes');
+    const q = (_railPath === null || _railPath === undefined)
+        ? '?session=' + encodeURIComponent(ACTIVE_SESSION)
+        : '?path=' + encodeURIComponent(_railPath);
+    const body = document.getElementById('sheet-body');
+    let d;
+    try {
+        d = await (await fetch('/api/git/status' + q)).json();
+    } catch (e) {
+        body.textContent = 'Git unavailable';
+        return;
+    }
+    if (!d.repo && d.repo !== '') {
+        body.textContent =
+            'Not a git repo.\n\nOnly some /dev projects are tracked. Open the ' +
+            'file rail and step into one, then tap Changes again.';
+        return;
+    }
+    _diffRepo = d.repo;
+    document.getElementById('sheet-title').textContent =
+        (d.repo || '/dev') + '  [' + (d.branch || '?') + ']  ·  ' +
+        d.files.length + ' changed';
+    body.innerHTML = '';
+    if (!d.files.length) {
+        body.textContent = 'Clean — nothing changed.';
+        return;
+    }
+
+    d.files.forEach(f => {
+        const full = joinRepo(f.name);
+
+        const head = document.createElement('div');
+        head.className = 'gfile';
+        head.innerHTML =
+            '<span class="gcaret">▸</span>' +
+            '<span class="gcode">' + esc(f.code) + '</span>' +
+            '<span class="gname">' + esc(f.name) + '</span>' +
+            (f.add === undefined ? '' :
+                '<span class="git-stat"><span class="dstat-add">+' + f.add +
+                '</span> <span class="dstat-del">−' + f.del + '</span></span>') +
+            '<span class="gopen" title="Open in editor">↗</span>';
+
+        const pane = document.createElement('div');
+        pane.className = 'gbody';
+
+        head.onclick = async (e) => {
+            if (e.target.classList.contains('gopen')) {
+                showFile(full);           // the arrow jumps to the editor view
+                return;
+            }
+            const open = head.classList.toggle('open');
+            pane.classList.toggle('shown', open);
+            if (!open || pane.dataset.loaded) return;
+            pane.innerHTML = '<div class="dl dl-ctx"><span class="dl-txt">loading…</span></div>';
+            try {
+                const r = await fetch('/api/git/diff?path=' + encodeURIComponent(full));
+                const dd = await r.json();
+                pane.innerHTML = '';
+                if (dd.error) {
+                    pane.innerHTML = '<div class="dl dl-ctx"><span class="dl-txt">' +
+                                     esc(dd.error) + '</span></div>';
+                } else {
+                    renderHunks(dd.diff || '(no changes)', pane);
+                }
+                pane.dataset.loaded = '1';
+            } catch (err) {
+                pane.innerHTML = '<div class="dl dl-ctx"><span class="dl-txt">could not load</span></div>';
+            }
+        };
+
+        body.appendChild(head);
+        body.appendChild(pane);
+    });
+}
+
+
+// --- Syntax colouring ------------------------------------------------------
+// Hand-rolled, ~60 lines, no library. highlight.js would be 120KB over a CDN,
+// which breaks the offline service worker and buys colouring for 180 languages
+// Patrick does not use. This covers python, js/ts, json, css, html, shell and
+// markdown, which is all of /dev.
+//
+// It carries STATE between lines, which is the part a naive per-line regex gets
+// wrong: this codebase is mostly long triple-quoted docstrings and block
+// comments, and without tracking them every keyword inside a comment lights up.
+const LANGS = {
+    py:   {line: '#',  kw: /\b(def|class|return|if|elif|else|for|while|try|except|finally|with|as|import|from|raise|yield|lambda|global|nonlocal|pass|break|continue|and|or|not|in|is|None|True|False|async|await|assert|del)\b/g},
+    js:   {line: '//', kw: /\b(function|return|if|else|for|while|try|catch|finally|const|let|var|class|new|typeof|instanceof|throw|async|await|null|undefined|true|false|this|import|export|default|break|continue|switch|case|of|in|delete)\b/g},
+    css:  {line: '//', kw: /\b(important|display|position|flex|grid|color|background|border|margin|padding|width|height)\b/g},
+    sh:   {line: '#',  kw: /\b(if|then|else|fi|for|do|done|while|case|esac|function|echo|export|local|return|cd|set)\b/g},
+    json: {line: null, kw: /\b(true|false|null)\b/g},
+    none: {line: null, kw: null},
+};
+
+function langOf(path) {
+    const n = path.toLowerCase();
+    if (n.endsWith('.py')) return 'py';
+    if (/\.(js|mjs|ts|tsx|jsx)$/.test(n)) return 'js';
+    if (/\.(css|scss)$/.test(n)) return 'css';
+    if (/\.(sh|bat|ps1)$/.test(n)) return 'sh';
+    if (/\.(json|jsonl)$/.test(n)) return 'json';
+    if (/\.(html|htm|xml|svg)$/.test(n)) return 'js';   // close enough for tags
+    return 'none';
+}
+
+const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// Returns HTML for one line. `st` is carried across lines: st.block holds the
+// delimiter we are waiting to close (a triple quote, or the close-comment
+// marker), or null when we are in ordinary code.
+function hlLine(line, lang, st) {
+    const L = LANGS[lang] || LANGS.none;
+
+    // Inside a multi-line string or block comment: the whole line is comment
+    // until the closing delimiter shows up.
+    if (st.block) {
+        const end = line.indexOf(st.block);
+        if (end === -1) return '<span class="h-com">' + esc(line) + '</span>';
+        const close = end + st.block.length;
+        const head = '<span class="h-com">' + esc(line.slice(0, close)) + '</span>';
+        st.block = null;
+        return head + hlLine(line.slice(close), lang, st);
+    }
+
+    // Does a block OPEN on this line and not close?
+    if (lang === 'py') {
+        const m = line.match(/("""|''')/);
+        if (m) {
+            const start = m.index + 3;
+            if (line.indexOf(m[1], start) === -1) {
+                st.block = m[1];
+                return '<span class="h-com">' + esc(line) + '</span>';
+            }
+        }
+    }
+    if (lang === 'js' || lang === 'css') {
+        const o = line.indexOf('/*');
+        if (o !== -1 && line.indexOf('*/', o + 2) === -1) {
+            st.block = '*/';
+            return esc(line.slice(0, o)) +
+                   '<span class="h-com">' + esc(line.slice(o)) + '</span>';
+        }
+    }
+
+    // Single line: strings and the comment tail compete for position, and
+    // whichever starts first wins — a '#' inside a string must not start a
+    // comment, and a quote inside a comment must not start a string.
+    const parts = [];
+    const str = /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/;
+    let rest = line;
+    while (rest) {
+        const sm = rest.match(str);
+        const cm = L.line ? rest.indexOf(L.line) : -1;
+        if (cm !== -1 && (!sm || cm < sm.index)) {
+            parts.push(hlCode(rest.slice(0, cm), L));
+            parts.push('<span class="h-com">' + esc(rest.slice(cm)) + '</span>');
+            rest = '';
+        } else if (sm) {
+            parts.push(hlCode(rest.slice(0, sm.index), L));
+            parts.push('<span class="h-str">' + esc(sm[0]) + '</span>');
+            rest = rest.slice(sm.index + sm[0].length);
+        } else {
+            parts.push(hlCode(rest, L));
+            rest = '';
+        }
+    }
+    return parts.join('');
+}
+
+// Keywords and numbers inside a run of actual code (no strings, no comments).
+function hlCode(t, L) {
+    let h = esc(t).replace(/\b(\d+\.?\d*)\b/g, '<span class="h-num">$1</span>');
+    if (L.kw) h = h.replace(L.kw, '<span class="h-kw">$1</span>');
+    return h;
+}
+
+
+// --- Format-aware views ----------------------------------------------------
+// The middle pane is the thing no terminal has: it shows a file the way that
+// file wants to be read. A .md is prose, not 400 lines of asterisks. A .csv is
+// a grid. A chart is a picture. Source is source, with line numbers you can
+// click. Everything below escapes content before it builds any markup.
+
+// Markdown. Deliberately small — headings, lists, quotes, rules, fenced code,
+// and inline bold/italic/code/links. No library, no HTML passthrough: a .md in
+// /dev is notes, and notes do not need embedded markup.
+function renderMarkdown(lines) {
+    const out = [];
+    let inFence = false, fence = [], list = null;
+
+    const inline = (t) => esc(t)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+        .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+    const closeList = () => { if (list) { out.push('</' + list + '>'); list = null; } };
+
+    lines.forEach(raw => {
+        const line = raw.replace(/\s+$/, '');
+        if (/^```/.test(line)) {
+            if (inFence) {
+                out.push('<pre class="md-pre">' + esc(fence.join('\n')) + '</pre>');
+                fence = []; inFence = false;
+            } else { closeList(); inFence = true; }
+            return;
+        }
+        if (inFence) { fence.push(raw); return; }
+
+        let m;
+        if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+            closeList();
+            out.push('<h' + m[1].length + ' class="md-h">' + inline(m[2]) + '</h' + m[1].length + '>');
+        } else if (/^(\s*)[-*+]\s+/.test(line)) {
+            if (list !== 'ul') { closeList(); out.push('<ul class="md-list">'); list = 'ul'; }
+            out.push('<li>' + inline(line.replace(/^\s*[-*+]\s+/, '')) + '</li>');
+        } else if (/^\s*\d+[.)]\s+/.test(line)) {
+            if (list !== 'ol') { closeList(); out.push('<ol class="md-list">'); list = 'ol'; }
+            out.push('<li>' + inline(line.replace(/^\s*\d+[.)]\s+/, '')) + '</li>');
+        } else if (/^>\s?/.test(line)) {
+            closeList();
+            out.push('<blockquote class="md-quote">' + inline(line.replace(/^>\s?/, '')) + '</blockquote>');
+        } else if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
+            closeList(); out.push('<hr class="md-hr">');
+        } else if (!line.trim()) {
+            closeList();
+        } else {
+            closeList();
+            out.push('<p class="md-p">' + inline(line) + '</p>');
+        }
+    });
+    closeList();
+    if (inFence && fence.length) out.push('<pre class="md-pre">' + esc(fence.join('\n')) + '</pre>');
+    return '<div class="md">' + out.join('\n') + '</div>';
+}
+
+// CSV -> table. Handles quoted fields with embedded commas and doubled quotes,
+// which is the only part of CSV that actually bites.
+function parseCsvLine(line) {
+    const out = []; let cur = '', q = false;
+    for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (q) {
+            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+            else if (c === '"') q = false;
+            else cur += c;
+        } else if (c === '"') q = true;
+        else if (c === ',') { out.push(cur); cur = ''; }
+        else cur += c;
+    }
+    out.push(cur);
+    return out;
+}
+
+function renderCsv(lines) {
+    const rows = lines.filter(l => l.trim()).map(parseCsvLine);
+    if (!rows.length) return '<div class="md-p">Empty.</div>';
+    const head = rows[0];
+    const body = rows.slice(1);
+    const cell = (v, tag) => '<' + tag + '>' + esc(v) + '</' + tag + '>';
+    let h = '<table class="csv"><thead><tr>' +
+            head.map(c => cell(c, 'th')).join('') + '</tr></thead><tbody>';
+    body.forEach(r => {
+        h += '<tr>' + head.map((_, i) => cell(r[i] === undefined ? '' : r[i], 'td')).join('') + '</tr>';
+    });
+    return h + '</tbody></table><div class="csv-note">' + body.length + ' rows</div>';
+}
+
+const IMG_RE = /\.(png|jpe?g|gif|webp|svg)$/i;
+
+// A chart is not text, so it does not go through the text viewer at all —
+// /api/file/raw hands the bytes to an <img>.
+function showImage(relPath) {
+    openSheet(relPath);
+    const body = document.getElementById('sheet-body');
+    body.innerHTML = '';
+    const img = document.createElement('img');
+    img.className = 'fv-img';
+    img.src = '/api/file/raw?path=' + encodeURIComponent(relPath);
+    img.alt = relPath;
+    img.onerror = () => { body.textContent = 'Could not load image'; };
+    body.appendChild(img);
+}
+
+// Newest-first gallery of every image in the folder (and one level down, which
+// is where vigor/daily lives). The chart folder's answer to "what changed".
+async function showCharts() {
+    const q = (_railPath === null || _railPath === undefined)
+        ? '?session=' + encodeURIComponent(ACTIVE_SESSION)
+        : '?path=' + encodeURIComponent(_railPath);
+    openSheet('Charts');
+    const body = document.getElementById('sheet-body');
+    body.textContent = 'Loading...';
+    let d;
+    try {
+        d = await (await fetch('/api/charts' + q)).json();
+    } catch (e) { body.textContent = 'Could not load charts'; return; }
+    document.getElementById('sheet-title').textContent =
+        (d.path || '/dev') + '  ·  ' + d.images.length + ' images';
+    body.innerHTML = '';
+    if (!d.images.length) { body.textContent = 'No images in this folder.'; return; }
+    const grid = document.createElement('div');
+    grid.className = 'fv-grid';
+    d.images.forEach(im => {
+        const cell = document.createElement('div');
+        cell.className = 'fv-cell';
+        const img = document.createElement('img');
+        img.loading = 'lazy';     // 120 charts should not all fetch at once
+        img.src = '/api/file/raw?path=' + encodeURIComponent(im.path);
+        const cap = document.createElement('div');
+        cap.className = 'fv-cap';
+        cap.textContent = im.name;
+        cell.appendChild(img);
+        cell.appendChild(cap);
+        cell.onclick = () => showImage(im.path);
+        grid.appendChild(cell);
+    });
+    body.appendChild(grid);
+}
+
+// The file viewer. Format-aware: the pane shows a file the way that file wants
+// to be read — prose as prose, a grid as a grid, source as source on the
+// Zenburn surface with clickable line numbers.
+async function showFile(relPath) {
+    wsSave({file: relPath, view: 'file'});
+    if (IMG_RE.test(relPath)) return showImage(relPath);
+    if (/\.pdf$/i.test(relPath)) {
+        openSheet(relPath);
+        const b = document.getElementById('sheet-body');
+        b.innerHTML = '';
+        const f = document.createElement('iframe');
+        f.className = 'fv-pdf';
+        f.src = '/api/file/raw?path=' + encodeURIComponent(relPath);
+        b.appendChild(f);
+        return;
+    }
+    openSheet(relPath);
+    const body = document.getElementById('sheet-body');
+    body.textContent = 'Loading...';
+    let d;
+    try {
+        d = await (await fetch('/api/file/read?path=' + encodeURIComponent(relPath))).json();
+    } catch (e) {
+        body.textContent = 'Could not read file';
+        return;
+    }
+    if (d.error) { body.textContent = d.error; return; }
+
+    const low = d.path.toLowerCase();
+    if (/\.md$/.test(low)) {
+        body.innerHTML = renderMarkdown(d.lines);
+        document.getElementById('sheet-title').textContent = d.path;
+        return;
+    }
+    if (/\.csv$/.test(low)) {
+        body.innerHTML = renderCsv(d.lines);
+        document.getElementById('sheet-title').textContent = d.path;
+        return;
+    }
+    if (/\.json$/.test(low)) {
+        // A one-line minified JSON file is unreadable; pretty-print it, then
+        // fall through to the normal colouring.
+        try {
+            const obj = JSON.parse(d.lines.join('\n'));
+            d.lines = JSON.stringify(obj, null, 2).split('\n');
+        } catch (e) { /* not valid JSON — show it as-is */ }
+    }
+
+    body.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    const lang = langOf(d.path);
+    const st = {block: null};         // carried down the file — see hlLine
+    if (d.truncated) {
+        const warn = document.createElement('div');
+        warn.className = 'fv-trunc';
+        warn.textContent = 'truncated — ' + d.truncated;
+        frag.appendChild(warn);
+    }
+    d.lines.forEach((line, i) => {
+        const n = i + 1;
+        const el = document.createElement('div');
+        el.className = 'fv-line';
+        const num = document.createElement('span');
+        num.className = 'fv-num';
+        num.textContent = n;
+        num.title = 'Insert ' + d.path + ':' + n;
+        // Tapping a line number puts "path:123" in the type bar — the sentence
+        // you actually want to say to an agent.
+        num.onclick = () => insertPath(d.path + ':' + n);
+        const txt = document.createElement('span');
+        txt.className = 'fv-text';
+        // Content is escaped inside hlLine before any span is added, so this
+        // innerHTML carries no file text through as markup.
+        txt.innerHTML = hlLine(line, lang, st) || ' ';
+        el.appendChild(num);
+        el.appendChild(txt);
+        frag.appendChild(el);
+    });
+    // Code lives on its own dark surface (Zenburn) rather than on the pane's
+    // light chrome — the split an editor makes between UI and buffer.
+    const pre = document.createElement('div');
+    pre.className = 'fv-code';
+    pre.appendChild(frag);
+    body.appendChild(pre);
+    document.getElementById('sheet-title').textContent =
+        d.path + '  ·  ' + d.lines.length + ' lines';
+}
+
+
+// One file's diff on its own, for callers outside the Changes accordion.
+async function showDiff(relPath) {
+    openSheet(relPath);
+    const body = document.getElementById('sheet-body');
+    body.textContent = 'Loading...';
+    try {
+        const d = await (await fetch('/api/git/diff?path=' + encodeURIComponent(relPath))).json();
+        if (d.error) { body.textContent = d.error; return; }
+        body.innerHTML = '';
+        renderHunks(d.diff || '(no changes)', body);
+    } catch (e) {
+        body.textContent = 'Could not load diff';
+    }
+}
+
+function toggleRail() {
+    const btn = document.getElementById('rail-btn');
+    if (DOCKED()) {
+        // 2026-10-02: the docked rail does NOT collapse any more — Patrick's
+        // call, "don't let me close that pane". It is the workspace's file
+        // explorer, and a workspace with no file list is the problem we were
+        // fixing. The button changes PROJECT instead.
+        document.body.classList.remove('rail-open', 'rail-collapsed');
+        showProjects();
+        return;
+    }
+    const open = document.body.classList.toggle('rail-open');
+    if (btn) btn.textContent = open ? '📁 Hide Files' : '📁 Files';
+    if (open) loadRail(_railPath === null ? null : _railPath);
+}
+
+// The project picker. Lives in the middle pane rather than a dropdown, because
+// there are ~100 folders in /dev and a dropdown that long is unusable. Picking
+// one re-points THIS terminal's workspace: rail, pane, and remembered file.
+async function showProjects() {
+    openSheet('Projects');
+    const body = document.getElementById('sheet-body');
+    body.textContent = 'Loading...';
+    let d;
+    try {
+        d = await (await fetch('/api/projects')).json();
+    } catch (e) { body.textContent = 'Could not list projects'; return; }
+    const KIND_ICON = {code: '\u2328\ufe0f', info: '\ud83d\udcc4', charts: '\ud83d\udcca'};
+    document.getElementById('sheet-title').textContent =
+        'Projects  \u00b7  ' + d.projects.length;
+    body.innerHTML = '';
+    const grid = document.createElement('div');
+    grid.className = 'proj-grid';
+    d.projects.forEach(pr => {
+        const cell = document.createElement('div');
+        cell.className = 'proj-cell' + (pr.name === _ws.folder ? ' current' : '');
+        cell.textContent = (KIND_ICON[pr.kind] || '') + ' ' + pr.name;
+        cell.onclick = () => openProject(pr.name);
+        grid.appendChild(cell);
+    });
+    body.appendChild(grid);
+}
+
+// Switching project clears the remembered file — it belonged to the old one.
+async function openProject(name) {
+    wsSave({folder: name, file: ''});
+    await loadRail(name);
+    paneDefault();
+    setStatus(name);
+}
+
+// --- Git strip ------------------------------------------------------------
+// "Where are we in git" as one always-visible line, rather than something you
+// have to go open. Refreshed when the workspace changes and on a slow timer —
+// git status on a /dev repo is a few ms, but seven of them every second would
+// be silly, so it is the ACTIVE workspace only.
+async function loadGitBar() {
+    const bar = document.getElementById('git-bar');
+    if (!bar) return;
+    const q = (_railPath === null || _railPath === undefined)
+        ? '?session=' + encodeURIComponent(ACTIVE_SESSION)
+        : '?path=' + encodeURIComponent(_railPath);
+    let d;
+    try {
+        d = await (await fetch('/api/git/summary' + q)).json();
+    } catch (e) { bar.style.display = 'none'; return; }
+
+    if (!d.repo && d.repo !== '') {
+        // 107 of 115 /dev folders have no repo. Rather than just saying so,
+        // offer the one-click fix — see /api/git/init (local init, no commit).
+        bar.style.display = 'block';
+        bar.className = 'git-plain';
+        bar.innerHTML = '<div class="gb-row">no git repo</div>' +
+            '<div class="gb-init">+ make this a repo</div>';
+        const btn = bar.querySelector('.gb-init');
+        btn.onclick = async (e) => {
+            e.stopPropagation();
+            btn.textContent = 'creating…';
+            try {
+                const r = await fetch('/api/git/init', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({path: _ws.folder || _railPath || ''}),
+                });
+                const dd = await r.json();
+                setStatus(dd.error ? dd.error : 'repo created on main');
+            } catch (err) { setStatus('init failed'); }
+            loadRail(_railPath);
+        };
+        return d;
+    }
+    bar.style.display = 'block';
+    bar.className = d.dirty ? 'git-dirty' : 'git-clean';
+
+    const bits = [];
+    bits.push('<span class="gb-branch">' + (d.github ? '\u2691 ' : '') +
+              esc(d.branch) + '</span>');
+    if (d.ahead)  bits.push('<span class="gb-ahead">\u2191' + d.ahead + '</span>');
+    if (d.behind) bits.push('<span class="gb-behind">\u2193' + d.behind + '</span>');
+    if (d.staged)    bits.push('<span class="gb-staged">+' + d.staged + '</span>');
+    if (d.unstaged)  bits.push('<span class="gb-unstaged">\u25cf' + d.unstaged + '</span>');
+    if (d.untracked) bits.push('<span class="gb-untracked">?' + d.untracked + '</span>');
+    if (d.conflicts) bits.push('<span class="gb-conflict">!' + d.conflicts + '</span>');
+    if (!d.dirty) bits.push('<span class="gb-ok">clean</span>');
+
+    let html = '<div class="gb-row">' + bits.join(' ') + '</div>';
+    if (d.last.sha) {
+        html += '<div class="gb-last"><span class="gb-sha">' + esc(d.last.sha) +
+                '</span> ' + esc(d.last.subject.slice(0, 60)) +
+                '<div class="gb-when">' + esc(d.last.when) + '</div></div>';
+    }
+    // A pushable state is worth saying in words, not just an arrow: "clean"
+    // next to "↑1" reads as done, and it is not.
+    if (d.ahead) {
+        html += '<div class="gb-push">' + d.ahead + ' commit' +
+                (d.ahead > 1 ? 's' : '') + ' to push</div>';
+    }
+    if (d.github) html += '<div class="gb-gh" id="gb-gh">GitHub \u2026</div>';
+    bar.innerHTML = html;
+    if (d.github) loadGitHub(d.repo);
+    return d;
+}
+
+// The GitHub half: open PRs and the latest CI run, via the gh CLI (already
+// authenticated on this box). Lazy and cached server-side for 2 minutes —
+// it is a network call, so it must never sit in the 15-second status poll.
+async function loadGitHub(repo) {
+    const slot = document.getElementById('gb-gh');
+    if (!slot) return;
+    let g;
+    try {
+        g = await (await fetch('/api/git/github?path=' + encodeURIComponent(repo || ''))).json();
+    } catch (e) { slot.textContent = ''; return; }
+    const parts = [];
+    if (g.prs && g.prs.length) {
+        parts.push('<span class="gb-pr">\u2387 ' + g.prs.length + ' open PR' +
+                   (g.prs.length > 1 ? 's' : '') + '</span>');
+    }
+    if (g.run) {
+        const c = (g.run.conclusion || g.run.status || '').toLowerCase();
+        const cls = c === 'success' ? 'gb-ci-ok'
+                  : (c === 'failure' ? 'gb-ci-bad' : 'gb-ci-run');
+        parts.push('<span class="' + cls + '">CI ' + esc(c || '?') + '</span>');
+    }
+    slot.innerHTML = parts.length ? parts.join(' ') : '<span class="gb-when">no PRs, no CI</span>';
+    // Clicking the GitHub line opens the PR list in the viewer.
+    slot.onclick = (e) => { e.stopPropagation(); showGitHub(repo, g); };
+}
+
+// PRs and CI in the middle pane, where there is room to read them.
+function showGitHub(repo, g) {
+    openSheet((repo || '/dev') + ' · GitHub');
+    const body = document.getElementById('sheet-body');
+    body.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'md';
+    let h = '';
+    if (g.run) {
+        h += '<h3 class="md-h">Latest CI</h3><p class="md-p">' +
+             esc(g.run.workflowName || '') + ' \u2014 <strong>' +
+             esc(g.run.conclusion || g.run.status || '?') + '</strong><br>' +
+             esc(g.run.displayTitle || '') + '</p>';
+    }
+    h += '<h3 class="md-h">Open pull requests</h3>';
+    if (!g.prs || !g.prs.length) {
+        h += '<p class="md-p">None.</p>';
+    } else {
+        h += '<ul class="md-list">' + g.prs.map(pr =>
+            '<li>#' + pr.number + ' ' + esc(pr.title) +
+            (pr.isDraft ? ' <em>(draft)</em>' : '') +
+            '<br><span class="gb-when">' + esc(pr.headRefName || '') + '</span></li>'
+        ).join('') + '</ul>';
+    }
+    wrap.innerHTML = h;
+    body.appendChild(wrap);
+}
+
+// Slow poll. Deliberately 15s: this is a status line, not a live diff, and the
+// live pane (next) is what will watch for changes properly.
+setInterval(() => { if (DOCKED()) loadGitBar(); }, 15000);
+
+// --- Splitter -------------------------------------------------------------
+// The viewer/terminal boundary, draggable. Width lands on RELEASE: every width
+// change re-columns xterm and rewraps the tmux pane, so doing it per mousemove
+// would be a reflow storm. The guide line carries the feedback instead.
+//
+// Persisted in localStorage rather than the workspace file — it is a property
+// of the SCREEN you are sitting at, not of the project. The phone should not
+// inherit the desktop's split.
+const RAIL_MIN = 120, RAIL_MAX = 420, MID_MIN = 300, TERM_MIN = 300;
+
+const paneW = (name) => parseInt(
+    getComputedStyle(document.body).getPropertyValue(name), 10) || 0;
+
+function paneApply(varName, key, px) {
+    document.documentElement.style.setProperty(varName, px + 'px');
+    try { localStorage.setItem(key, px); } catch (e) {}
+}
+
+function paneRestore() {
+    if (!DOCKED()) return;
+    [['--rail-w', 'spark.railW'], ['--mid-w', 'spark.midW']].forEach(([v, k]) => {
+        try {
+            const px = parseInt(localStorage.getItem(k), 10);
+            if (px) document.documentElement.style.setProperty(v, px + 'px');
+        } catch (e) {}
+    });
+}
+
+// One handler, two boundaries. `which` is the pane the handle resizes, and the
+// clamp for each is what keeps the OTHER two panes usable.
+function makeSplitter(el, which) {
+    const guide = document.getElementById('split-guide');
+    if (!el) return;
+    let dragging = false;
+
+    // Returns the clamped SCREEN x for the handle.
+    const clamp = (x) => {
+        if (which === 'rail') {
+            const mid = paneW('--mid-w');
+            return Math.max(RAIL_MIN,
+                   Math.min(x, RAIL_MAX, window.innerWidth - mid - TERM_MIN));
+        }
+        const rail = paneW('--rail-w');
+        return Math.max(rail + MID_MIN, Math.min(x, window.innerWidth - TERM_MIN));
+    };
+
+    el.addEventListener('mousedown', (e) => {
+        if (!DOCKED()) return;
+        dragging = true;
+        document.body.classList.add('splitting');
+        guide.style.left = clamp(e.clientX) + 'px';
+        e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        guide.style.left = clamp(e.clientX) + 'px';
+    });
+
+    window.addEventListener('mouseup', (e) => {
+        if (!dragging) return;
+        dragging = false;
+        document.body.classList.remove('splitting');
+        const x = clamp(e.clientX);
+        if (which === 'rail') {
+            paneApply('--rail-w', 'spark.railW', x);
+            loadRail(_railPath);     // re-truncate names at the new width
+        } else {
+            paneApply('--mid-w', 'spark.midW', x - paneW('--rail-w'));
+        }
+        // ~10.2px per terminal column at ttyd's 17px mono, so this doubles as
+        // the column-count readout for the pane you just squeezed.
+        const cols = Math.floor(
+            (window.innerWidth - paneW('--rail-w') - paneW('--mid-w')) / 10.2);
+        setStatus('Files ' + paneW('--rail-w') + ' \u00b7 viewer ' +
+                  paneW('--mid-w') + ' \u00b7 terminal ~' + cols + ' cols');
+    });
+
+    // Double-click either handle: back to the stylesheet defaults.
+    el.addEventListener('dblclick', () => {
+        ['--rail-w', '--mid-w'].forEach(v =>
+            document.documentElement.style.removeProperty(v));
+        try {
+            localStorage.removeItem('spark.railW');
+            localStorage.removeItem('spark.midW');
+        } catch (e) {}
+        loadRail(_railPath);
+        setStatus('Panes reset');
+    });
+}
+
+makeSplitter(document.getElementById('splitter-rail'), 'rail');
+makeSplitter(document.getElementById('splitter'), 'mid');
+
+// What the middle pane shows when nothing has been clicked yet. This is the
+// payoff of classifying folders: "what is going on here" is a git diff in
+// manna and a wall of charts in vigor, and the pane should not have to be told
+// which one it is looking at.
+// The default view is the DIFF. Patrick, 2026-10-02: "the diff should always
+// be the default view when I click on a terminal." It used to vary by folder
+// kind, which meant you could not predict what a tab switch would show.
+//
+// The one fallback: a folder that is not a git repo has no diff to show, and
+// most of /dev is not tracked. Rather than make "not a git repo" the default
+// view in camino and vigor, those fall back to the folder's own best view —
+// charts for a chart folder, the file list otherwise.
+async function paneDefault() {
+    if (!DOCKED()) return;
+    const git = await loadGitBar();
+    if (git && (git.repo || git.repo === '')) return showGit();
+    if (_railKind === 'charts') return showCharts();
+    openSheet('/dev/' + (_railPath || ''));
+    document.getElementById('sheet-body').textContent =
+        'No git repo here — click a file in the rail to read it.';
+}
+
+// Docked means visible at load, which means it has to be POPULATED at load —
+// the rail used to fill only on the button press.
+document.addEventListener('DOMContentLoaded', async () => {
+    if (!DOCKED()) return;
+    await wsLoad(ACTIVE_SESSION);
+    // Docked, the button gives width back rather than closing an overlay.
+    const x = document.getElementById('sheet-close');
+    if (x) x.textContent = 'Hide';
+    const rb = document.getElementById('rail-btn');
+    if (rb) rb.textContent = '\u2637 Projects';
+    document.querySelectorAll('.splitter').forEach(x => x.style.display = 'block');
+    paneRestore();
+    const btn = document.getElementById('rail-btn');
+    if (btn) btn.textContent = '📁 Hide Files';
+    await loadRail(_ws.folder || null);
+    paneDefault();
+});
 
 function toggleHamburger() {
     const panel = document.getElementById('hamburger-panel');
@@ -803,8 +2069,14 @@ function switchSession(id, chained) {
     // (MAX_LOADED) for instant switch-back, free the rest (mobile memory).
     loadActiveTerminal();
     unloadInactiveTerminals();
+    // Then warm the new tab's neighbours in the background, so the NEXT ±1
+    // switch is a visibility flip too. Debounced — a swipe run skips the
+    // terminals it passes straight through.
+    scheduleNeighbourWarm();
     applyTheme(id);
     renderTabs();
+    // Tapping a tab is the main way sessions change, so the panes follow HERE.
+    workspaceFollow();
     // Sync backend active session in the background; don't block the UI on it.
     fetch('/api/session', {
         method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}),
@@ -871,7 +2143,12 @@ function renderTabs() {
     _sessions.forEach(s => {
         const pill = document.createElement('button');
         pill.className = 'term-pill' + (s.id === ACTIVE_SESSION ? ' active' : '');
-        pill.innerText = s.name || s.id;
+        // The label now comes from WHERE the pane is, unless Patrick named it.
+        // terminal_names.txt already read like a folder list (camino, slate,
+        // vigor, atrium, general) — those were hand-typed labels that could
+        // drift from the pane's actual cwd. A derived label cannot drift.
+        pill.innerText = s.named ? s.name : (s.project || s.name || s.id);
+        if (s.cwd) pill.title = '/dev/' + s.cwd;
         if (s.color) {
             pill.style.background = s.color;
             pill.style.borderColor = s.color;
@@ -948,6 +2225,7 @@ async function syncSession() {
         w.classList.toggle('term-hidden', w.id !== 'wrap-' + ACTIVE_SESSION);
     });
     applyTheme(ACTIVE_SESSION);
+    workspaceFollow();
     document.body.focus();
 }
 

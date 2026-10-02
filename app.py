@@ -19,7 +19,7 @@ from pathlib import Path
 import platform
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, make_response, render_template, request, send_file
+from flask import Flask, jsonify, make_response, render_template, request, send_file, send_from_directory
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 
@@ -67,6 +67,14 @@ def _auth_guard():
     if not SPARK_TOKEN:
         return  # no token configured — auth disabled (warned at startup)
     if request.path.startswith("/static/"):
+        return
+    # PWA plumbing is exempt, and MUST be. Chrome fetches a web manifest with
+    # credentials OMITTED — it deliberately withholds the cookie — so a gated
+    # manifest returns 401, Chrome fails to parse it as JSON, and the only
+    # symptom is "this app cannot be installed" with no further explanation.
+    # Neither file carries secrets: the manifest is public app metadata and
+    # sw.js is a no-op stub. The terminals and the API stay gated as before.
+    if request.path in ("/manifest.webmanifest", "/sw.js", "/offline.html"):
         return
     if _is_local_direct() or _token_ok():
         return
@@ -245,6 +253,11 @@ logging.basicConfig(level=logging.INFO,
                                             backupCount=1, encoding="utf-8"),
                         logging.StreamHandler(),
                     ])
+# Spark is a light personal tool, not a service worth auditing - Flask's
+# per-request access log (one line per poll, e.g. GET /api/sessions every few
+# seconds) is pure noise here. Keep the app's own action logs (SESSION_SWITCH,
+# SEND, BROADCAST, etc.) but drop routine request logging.
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
 PORT = 5023
 HOST = "0.0.0.0"
 
@@ -356,6 +369,33 @@ def _apply_terminal_colors():
     for i, s in enumerate(SESSIONS):
         s["color"] = terms[i % len(terms)].get("color", s["color"])
         s["bg"] = terms[i % len(terms)].get("background", s.get("bg", "#ffffff"))
+
+# Model/effort/speed buttons (hamburger quick-switch + the /config page) live
+# in models.json (label + literal command, e.g. "/model claude-opus-5" or
+# "/fast"). Hot-reloaded on every page load - edit the file, refresh, no
+# restart needed. See its "_readme".
+_MODELS_FILE = _SPARK_DIR / "models.json"
+_DEFAULT_SETTINGS = {
+    "model": [
+        {"label": "→ Fable 5.1", "command": "/model claude-fable-5-1"},
+        {"label": "→ Opus 5", "command": "/model claude-opus-5"},
+    ],
+    "effort": [],
+    "speed": [{"label": "⚡ Toggle Fast Mode", "command": "/fast"}],
+}
+
+
+def _load_settings(key):
+    """Return the named button list (model/effort/speed) from models.json."""
+    try:
+        data = json.loads(_MODELS_FILE.read_text(encoding="utf-8"))
+        buttons = data.get(key)
+        if isinstance(buttons, list) and buttons:
+            return buttons
+    except (OSError, ValueError):
+        pass
+    return _DEFAULT_SETTINGS.get(key, [])
+
 
 # Terminal names live in terminal_names.txt (format: N=name, blank = number).
 # Hot-reloaded on every /api/sessions poll so edits show up on refresh.
@@ -474,6 +514,143 @@ def send_to_claude(text, session_id=None):
 # debug mode; delete it to go back to normal.
 _KEYDEBUG_FLAG = _SPARK_DIR / ".keydebug"
 
+# job_id -> wall-clock time the button press arrived, so every later stage can
+# report "seconds since the press" instead of seconds since some inner step.
+# Added 2026-09-30: the old logging bracketed only the MIDDLE of the Listen
+# pipeline, which made a 30s round trip look like a 5s one.
+_job_start = {}
+
+# --- Warm Piper TTS -------------------------------------------------------
+# Local neural TTS. Measured 2026-09-30 on this box:
+#   synthesis      0.20s (1 sentence) / 0.37s (3 sentences)
+#   gTTS, for comparison: 0.73s / 2.24s over the network
+#   voice MODEL LOAD: 1.66s  <-- the whole reason this lives here
+# notify.py is spawned fresh per press, so loading the voice there would cost
+# 1.66s every time and erase Piper's advantage entirely. app.py is long-lived,
+# so it loads the voice ONCE in the background at startup and reuses it.
+# If anything here fails, the Listen path silently falls back to the original
+# notify.py gTTS route — Piper is an optimization, never a dependency.
+_PIPER_MODEL = _SPARK_DIR / "voices" / "en_US-lessac-medium.onnx"
+_piper_voice = None
+_piper_lock = threading.Lock()
+
+
+def _piper_warm():
+    """Load the voice once, in the background, at startup."""
+    global _piper_voice
+    if not _PIPER_MODEL.exists():
+        logging.info(f"PIPER: no model at {_PIPER_MODEL} — using gTTS path")
+        return
+    try:
+        t = time.time()
+        from piper import PiperVoice
+        v = PiperVoice.load(str(_PIPER_MODEL))
+        with _piper_lock:
+            _piper_voice = v
+        logging.info(f"PIPER: voice warm in {time.time() - t:.2f}s")
+    except Exception as e:
+        logging.warning(f"PIPER: load failed ({e}) — using gTTS path")
+
+
+def _piper_say(text, wav_path):
+    """Synthesize to wav with the warm voice. Returns True on success."""
+    with _piper_lock:
+        v = _piper_voice
+    if v is None:
+        return False
+    try:
+        import wave
+        t = time.time()
+        with wave.open(str(wav_path), "wb") as w:
+            v.synthesize_wav(text, w)
+        logging.info(f"PIPER: synth {len(text)} chars in {time.time() - t:.2f}s")
+        return True
+    except Exception as e:
+        logging.warning(f"PIPER: synth failed ({e}) — falling back")
+        return False
+
+
+threading.Thread(target=_piper_warm, daemon=True).start()
+
+
+# ── PWA: installable, chrome-free app ──────────────────────────────────────
+# Added 2026-09-30 to get rid of Chrome's URL bar, which was eating ~an inch of
+# vertical space. Two routes, both of which MUST live at the site root:
+#   /manifest.webmanifest — Flask's static handler serves .webmanifest as
+#       octet-stream, which Chrome ignores. Needs the real MIME type.
+#   /sw.js — a service worker's SCOPE is its own directory. At /static/sw.js it
+#       could only control /static/*; it has to be served from / to control the
+#       whole app. This is the classic reason PWA installs silently fail.
+@app.route("/manifest.webmanifest")
+def manifest():
+    resp = send_from_directory(app.static_folder, "manifest.webmanifest",
+                               mimetype="application/manifest+json")
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.route("/offline.html")
+def offline_page():
+    """Tiny stub shown ONLY when a navigation fails with no network.
+
+    Exists to satisfy Chrome's "does it work offline?" installability check.
+    Kept deliberately minimal and self-contained — it must never be mistaken for
+    the real UI, and it must never need Spark's CSS or JS to render.
+    """
+    resp = make_response(
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Spark — offline</title></head>"
+        "<body style=\"margin:0;display:flex;align-items:center;"
+        "justify-content:center;height:100vh;background:#3c3836;color:#ebdbb2;"
+        "font-family:system-ui,sans-serif;text-align:center\">"
+        "<div><h1 style='margin:0 0 .5rem;font-size:1.3rem'>Spark is offline</h1>"
+        "<p style='margin:0;opacity:.75;font-size:.9rem'>No connection to the "
+        "terminals. Reconnect and reload.</p></div></body></html>"
+    )
+    # charset MUST be explicit — without it the em dash in <title> mojibakes.
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    return resp
+
+
+@app.route("/sw.js")
+def service_worker():
+    """Service worker: network-first, and it caches exactly ONE file.
+
+    Chrome will not offer "Install" unless the app answers a navigation while
+    offline — a no-op fetch handler fails that check silently, which is what
+    blocked the install on 2026-09-30.
+
+    The critical constraint: it must NOT cache chat.html or style.css. Those
+    change constantly, and a cached copy would pin a stale UI on the phone with
+    no obvious way to clear it. So the only cached entry is /offline.html, and it
+    is served ONLY when a navigation request throws (i.e. no network). Every
+    online request, and every non-navigation request, goes straight to the
+    network untouched.
+    """
+    resp = make_response(
+        "const CACHE = 'spark-offline-v1';\n"
+        "const OFFLINE = '/offline.html';\n"
+        "self.addEventListener('install', e => {\n"
+        "  e.waitUntil(caches.open(CACHE)\n"
+        "    .then(c => c.add(new Request(OFFLINE, {cache: 'reload'})))\n"
+        "    .then(() => self.skipWaiting()));\n"
+        "});\n"
+        "self.addEventListener('activate', e => {\n"
+        "  e.waitUntil(caches.keys()\n"
+        "    .then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))\n"
+        "    .then(() => self.clients.claim()));\n"
+        "});\n"
+        "self.addEventListener('fetch', e => {\n"
+        "  // Navigations only. Network first; the cached stub is a last resort.\n"
+        "  if (e.request.mode !== 'navigate') return;  // everything else: untouched\n"
+        "  e.respondWith(fetch(e.request).catch(() => caches.match(OFFLINE)));\n"
+        "});\n"
+    )
+    resp.headers["Content-Type"] = "application/javascript"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
 
 @app.route("/")
 def home():
@@ -482,9 +659,87 @@ def home():
     active = get_session()
     resp = make_response(render_template("chat.html",
         session=active, sessions=SESSIONS, theme_ui=_theme_ui_for_template(),
+        model_buttons=_load_settings("model"),
         key_debug=_KEYDEBUG_FLAG.exists()))
     resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp
+
+
+@app.route("/config")
+def config_page():
+    """Model/effort/speed settings page, reached from the hamburger's ⚙ Config
+    button. Buttons come from models.json (hot-reloaded); each one sends its
+    command to either just the active terminal or every terminal at once."""
+    resp = make_response(render_template("config.html",
+        session=get_session(), sessions=SESSIONS, theme_ui=_theme_ui_for_template(),
+        model_buttons=_load_settings("model"),
+        effort_buttons=_load_settings("effort"),
+        speed_buttons=_load_settings("speed")))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
+
+
+def _send_and_report(sid, command, wait=0.4):
+    """Send a literal command to a session, then read back Claude Code's own
+    reply line (the "⎿ ..." line it prints under a command like /fast or
+    /effort) so the UI can show the real resulting state, not just 'sent'.
+
+    Some commands need a follow-up keypress before they actually take effect,
+    and left unanswered that leaves the session silently stuck (seen live,
+    2026-09-29 - looked like "the API going in and out" from the phone, but
+    both terminals were just waiting on a keypress that never came):
+      - /effort asks "re-read full history - Yes/No" -> answer "1" (yes).
+      - /fast shows "Fast mode OFF ... Tab to toggle - Enter to confirm" ->
+        Tab actually flips the shown value, then Enter confirms it. Without
+        this, "Toggle Fast Mode" never toggled anything - it just opened the
+        dialog and stopped.
+    The button press already means "go ahead", so auto-answer both instead
+    of hanging."""
+    send_to_claude(command, session_id=sid)
+    time.sleep(wait)
+    tmux = next((s["tmux"] for s in SESSIONS if s["id"] == sid), None)
+    if not tmux:
+        return None
+    result = _tmux_run("capture-pane", "-t", tmux, "-p")
+    text = result.stdout or ""
+    if "1. Yes" in text and "2. No" in text:
+        _tmux_run("send-keys", "-t", tmux, "1", "Enter")
+        time.sleep(wait)
+        result = _tmux_run("capture-pane", "-t", tmux, "-p")
+        text = result.stdout or ""
+    elif "Tab to toggle" in text:
+        _tmux_run("send-keys", "-t", tmux, "Tab")
+        time.sleep(0.15)
+        _tmux_run("send-keys", "-t", tmux, "Enter")
+        time.sleep(wait)
+        result = _tmux_run("capture-pane", "-t", tmux, "-p")
+        text = result.stdout or ""
+    for line in reversed(text.splitlines()):
+        if "⎿" in line:
+            return line.split("⎿", 1)[1].strip()
+    return None
+
+
+@app.route("/api/broadcast", methods=["POST"])
+def api_broadcast():
+    """Send a literal command (from the /config page) to one or all terminals,
+    reporting back each terminal's actual resulting state where Claude Code
+    prints one (e.g. "Fast mode ON")."""
+    data = request.get_json()
+    command = (data.get("command") or "").strip()
+    scope = data.get("scope", "active")
+    if not command:
+        return jsonify({"error": "No command"}), 400
+    if scope == "all":
+        results = [{"name": s["name"], "reply": _send_and_report(s["id"], command)}
+                   for s in SESSIONS]
+        logging.info(f"BROADCAST '{command}' -> all {len(SESSIONS)} terminals: {results}")
+        return jsonify({"ok": True, "scope": scope, "results": results})
+    else:
+        active = get_session()
+        reply = _send_and_report(active["id"], command)
+        logging.info(f"BROADCAST '{command}' -> active ({active['tmux']}): {reply}")
+        return jsonify({"ok": True, "scope": scope, "reply": reply})
 
 
 @app.route("/test")
@@ -545,15 +800,54 @@ _SHELLS = {"bash", "sh", "zsh", "fish", "dash"}
 
 @app.route("/api/sessions")
 def api_sessions():
+    """Session list for the tab bar — now including WHERE each pane is.
+
+    _pane_info() has always returned every pane's path in a single tmux call;
+    _pane_commands() then dropped it on the floor. The folder was free all
+    along. Carrying it through is what lets the tabs say "camino" because the
+    pane is IN camino, rather than because someone typed that label once and
+    the pane has since wandered somewhere else.
+
+    No new state file: a terminal's folder is its own cwd, and `cd` is how you
+    point a slot at a project. tmux is the source of truth.
+    """
     _apply_terminal_names()
     _apply_terminal_colors()
-    cmds = _pane_commands()
+    info = _pane_info()
+    names = _load_terminal_names()
+    root = FILES_ROOT.resolve()
     out = []
     for s in SESSIONS:
         d = dict(s)
-        cmd = cmds.get(s["tmux"])
+        pane = info.get(s["tmux"]) or {}
+        cmd = pane.get("cmd")
         d["running"] = cmd
         d["alive"] = bool(cmd) and cmd not in _SHELLS
+
+        cwd = ""
+        try:
+            raw = _wsl_to_win(pane.get("path") or "")
+            if raw:
+                pth = Path(raw).resolve()
+                if pth == root or pth.is_relative_to(root):
+                    cwd = "" if pth == root else \
+                        str(pth.relative_to(root)).replace("\\", "/")
+        except Exception:
+            pass
+        d["cwd"] = cwd
+
+        # The tab's label comes from its WORKSPACE, not its pane cwd. The
+        # workspace is what Patrick assigns and what the panes follow; a pane's
+        # cwd is wherever its shell happens to sit (all seven sit at /dev root).
+        # Last segment only: "revel/atrium" is the folder, "atrium" is the name
+        # he calls it.
+        ws_folder = _workspace(s["id"])["folder"]
+        folder = ws_folder or cwd
+        d["folder"] = folder
+        d["project"] = (folder.rstrip("/").split("/")[-1] if folder else "dev")
+        # Manual names win — "election" is not a folder name, and Patrick
+        # should keep the right to call a slot whatever he wants.
+        d["named"] = bool(names.get(s["id"]))
         out.append(d)
     return jsonify({"sessions": out, "active": _active_session_id})
 
@@ -601,7 +895,17 @@ def launch_session():
             tmux = s["tmux"]
             _tmux_run("respawn-pane", "-k", "-t", tmux)
             time.sleep(0.5)  # let the fresh shell come up before typing into it
+            # "Open a terminal HERE" — the caller may pass the folder it is
+            # looking at. Guarded by _files_safe, so a bad path falls back to
+            # /dev rather than cd-ing somewhere off the workspace.
             work_dir = "/mnt/c/dev"
+            want = _files_safe(data.get("path") or "")
+            if want is not None and want.exists():
+                if want.is_file():
+                    want = want.parent
+                sub = str(want.relative_to(FILES_ROOT.resolve())).replace("\\", "/")
+                if sub and sub != ".":
+                    work_dir = "/mnt/c/dev/" + sub
             _tmux_run("send-keys", "-t", tmux,
                       f"cd {work_dir} && {cmd}", "Enter")
             logging.info(f"LAUNCH {cli} in {tmux} ({cmd})")
@@ -656,6 +960,669 @@ def _resolve_session(data=None):
             if s["id"] == sid:
                 return s["tmux"]
     return get_session()["tmux"]
+
+
+# --- File rail -------------------------------------------------------------
+# Lists the active terminal's working directory so the UI can offer tap-to-insert
+# paths. Dictating "templates/chat.html" by voice is the single worst friction in
+# Spark; tapping it is instant.
+#
+# SECURITY: jailed to FILES_ROOT, and that is not optional. Spark is reachable
+# from the public internet through the tunnel. Until now its API could only
+# inject keystrokes; a directory lister is the first endpoint that can READ the
+# disk, so an unconstrained one would hand the whole filesystem to anyone who got
+# past the token. Every path is resolved and then re-checked to be inside the
+# root, which also kills "..", symlinks, and absolute-path escapes.
+FILES_ROOT = Path("/mnt/c/dev") if not _IS_WINDOWS else Path("C:/dev")
+_FILES_SKIP = {".git", "__pycache__", "node_modules", ".venv", "venv",
+               ".pytest_cache", ".mypy_cache", ".idea", ".vscode"}
+
+
+def _wsl_to_win(raw):
+    """/mnt/c/dev/spark -> C:/dev/spark.
+
+    tmux lives in WSL and reports WSL paths; this Flask app is a Windows
+    process, where Path("/mnt/c/dev") resolves to C:\\mnt\\c\\dev and is
+    relative to nothing. Found 2026-10-02: every pane's cwd was being discarded
+    by that mismatch, which is also why the file rail always opened at /dev
+    root no matter where the terminal actually was.
+    """
+    t = (raw or "").strip().replace("\\", "/")
+    if len(t) > 6 and t[:5].lower() == "/mnt/" and t[6] == "/":
+        return t[5].upper() + ":" + t[6:]
+    return t
+
+
+def _files_safe(raw):
+    """Resolve `raw` under FILES_ROOT, or return None if it escapes."""
+    try:
+        root = FILES_ROOT.resolve()
+        target = (root / (raw or "").lstrip("/\\")).resolve()
+        # is_relative_to is the whole guard — do not replace with startswith on
+        # strings, which "/mnt/c/devil" would pass.
+        return target if target == root or target.is_relative_to(root) else None
+    except Exception:
+        return None
+
+
+def _pane_cwd_rel(tmux):
+    """The terminal's cwd, as a path relative to FILES_ROOT ('' if outside)."""
+    r = _tmux_run("display-message", "-p", "-t", tmux, "#{pane_current_path}")
+    cwd = _wsl_to_win((r.stdout or "").strip())
+    if not cwd:
+        return ""
+    try:
+        p = Path(cwd).resolve()
+        root = FILES_ROOT.resolve()
+        if p == root or p.is_relative_to(root):
+            return str(p.relative_to(root)).replace("\\", "/").strip(".")
+    except Exception:
+        pass
+    return ""
+
+
+# Code folder or information folder? Spark's /dev holds both — manna and spark
+# are code, while camino, haven, tome and nota are stacks of documents with no
+# source in them. They want different treatment: "what changed" means a git
+# diff in a code folder and "which files are new" in an information folder.
+#
+# Classified by a SHALLOW scan — this runs on every listing, so it reads one
+# directory level and stops. Two levels deep would mean walking node_modules.
+_CODE_EXT = {".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".sh",
+             ".bat", ".sql", ".ipynb", ".go", ".rs", ".java", ".ps1"}
+_IMG_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+_DOC_EXT = {".pdf", ".docx", ".md", ".txt", ".csv", ".xlsx", ".heic",
+            ".eml", ".pptx"} | _IMG_EXT
+
+
+def _folder_kind(target):
+    """'code' | 'info' | 'charts' — what KIND of folder this is.
+
+    Three kinds because Patrick's /dev has three. manna and spark are code.
+    camino and tome are stacks of documents. vigor is 71 PNGs of charts and 17
+    PDFs sitting next to 33 scripts nobody wants to look at — counting source
+    files would call it code, which is true and useless. What he wants from
+    vigor is the pictures.
+
+    So: images are weighed on their own. If they dominate what is NOT source,
+    the folder is a chart folder regardless of how many .py files are lying
+    around generating them.
+    """
+    code = doc = img = 0
+    try:
+        for e in target.iterdir():
+            if e.name.startswith(".") or e.name in _FILES_SKIP:
+                continue
+            if e.is_dir():
+                continue
+            ext = e.suffix.lower()
+            if ext in _IMG_EXT:
+                img += 1
+                doc += 1
+            elif ext in _CODE_EXT:
+                code += 1
+            elif ext in _DOC_EXT:
+                doc += 1
+    except (OSError, PermissionError):
+        return "code"
+    # Charts first: this is the one kind that survives a pile of source files,
+    # because the source is the chart GENERATOR, not the point.
+    if img >= 5 and doc and img / doc >= 0.4:
+        return "charts"
+    # A git repo is code even when the top level is all README — the source is
+    # a directory down. Ties go to code: showing a diff pane for a document
+    # folder is harmless, hiding it for a code folder is not.
+    if (target / ".git").exists():
+        return "code"
+    return "info" if doc > code else "code"
+
+
+@app.route("/api/files")
+def api_files():
+    """Directory listing for the rail. ?path= is relative to FILES_ROOT;
+    omit it to follow the active terminal's cwd."""
+    raw = request.args.get("path")
+    if raw is None:
+        raw = _pane_cwd_rel(_resolve_session({"session": request.args.get("session")}))
+    target = _files_safe(raw)
+    if target is None or not target.exists():
+        target = FILES_ROOT.resolve()
+    if target.is_file():
+        target = target.parent
+
+    dirs, files = [], []
+    try:
+        for e in sorted(target.iterdir(), key=lambda x: x.name.lower()):
+            if e.name.startswith(".") or e.name in _FILES_SKIP:
+                continue
+            (dirs if e.is_dir() else files).append(e.name)
+    except PermissionError:
+        pass
+
+    root = FILES_ROOT.resolve()
+    rel = "" if target == root else str(target.relative_to(root)).replace("\\", "/")
+    # parent: None at the root (so the UI hides the ".." row), "" one level down
+    # (meaning "go to the root"), otherwise the parent's relative path.
+    if not rel:
+        parent = None
+    else:
+        up = str(Path(rel).parent).replace("\\", "/")
+        parent = "" if up == "." else up
+    return jsonify({
+        "root": str(root).replace("\\", "/"),
+        "path": rel,
+        "parent": parent,
+        "kind": _folder_kind(target),
+        "dirs": dirs[:400],
+        "files": files[:400],
+    })
+
+
+# --- Workspaces ------------------------------------------------------------
+# A terminal is not just a pane any more, it is a WORKSPACE: a folder, the file
+# you had open, and which view the middle pane was showing. Switching tabs
+# restores all three, so tab 5 is "vigor, looking at the charts" and tab 2 is
+# "camino, reading that PDF" — and the file rail is that folder's explorer, not
+# a browser of all of /dev.
+#
+# Server-side rather than localStorage on purpose: the phone and the desktop
+# are the same seven workspaces, and Patrick would rather have the state in a
+# file he can read than in a browser he cannot.
+_WS_FILE = _SPARK_DIR / "_workspaces.json"
+
+
+def _load_workspaces():
+    try:
+        d = json.loads(_WS_FILE.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_workspaces(d):
+    try:
+        _WS_FILE.write_text(json.dumps(d, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _workspace(sid):
+    """One session's workspace, falling back to its pane cwd then to /dev."""
+    ws = _load_workspaces().get(str(sid)) or {}
+    folder = ws.get("folder")
+    if folder is None:
+        # Never been set: start where the pane actually is.
+        tmux = next((x["tmux"] for x in SESSIONS if x["id"] == str(sid)), None)
+        folder = _pane_cwd_rel(tmux) if tmux else ""
+    return {
+        "folder": folder or "",
+        "file": ws.get("file") or "",
+        "view": ws.get("view") or "",
+    }
+
+
+@app.route("/api/workspace", methods=["GET", "POST"])
+def api_workspace():
+    """GET ?session=N -> that workspace. POST {session, folder?, file?, view?}.
+
+    Partial writes: only the keys present are changed, so saving the open file
+    does not clobber the folder.
+    """
+    if request.method == "GET":
+        sid = request.args.get("session") or _active_session_id
+        return jsonify(_workspace(sid))
+
+    data = request.get_json() or {}
+    sid = str(data.get("session") or _active_session_id)
+    all_ws = _load_workspaces()
+    ws = all_ws.get(sid) or {}
+    for key in ("folder", "file", "view"):
+        if key in data:
+            val = (data.get(key) or "").strip().strip("/")
+            if key in ("folder", "file") and val:
+                # Everything stored is /dev-relative and guarded on the way in.
+                if _files_safe(val) is None:
+                    return jsonify({"error": "outside /dev"}), 400
+            ws[key] = val
+    all_ws[sid] = ws
+    _save_workspaces(all_ws)
+    return jsonify({"ok": True, **_workspace(sid)})
+
+
+@app.route("/api/projects")
+def api_projects():
+    """Top-level /dev folders, with each one's kind — the project picker."""
+    root = FILES_ROOT.resolve()
+    out = []
+    try:
+        for e in sorted(root.iterdir(), key=lambda x: x.name.lower()):
+            if e.is_dir() and not e.name.startswith(".") and e.name not in _FILES_SKIP:
+                out.append({"name": e.name, "kind": _folder_kind(e)})
+    except (OSError, PermissionError):
+        pass
+    return jsonify({"projects": out})
+
+
+@app.route("/api/file/read")
+def api_file_read():
+    """One file's text for the viewer. ?path= is relative to FILES_ROOT.
+
+    Read-only on purpose. Spark is a cockpit for watching agents work, not an
+    editor — there is no write endpoint and there should not be one. If a file
+    needs changing, that is what the terminal is for.
+
+    Three caps, each with a visible marker in the payload so the UI can say so
+    rather than silently showing a half file: bytes, lines, and "is this even
+    text". A NUL byte in the first 8KB is the binary test — cheap, and wrong
+    only for exotic encodings nothing in /dev uses.
+    """
+    target = _files_safe(request.args.get("path", ""))
+    if target is None:
+        return jsonify({"error": "outside /dev"}), 400
+    if not target.exists() or not target.is_file():
+        return jsonify({"error": "not a file"}), 404
+
+    size = target.stat().st_size
+    try:
+        head = target.open("rb").read(8192)
+    except OSError as e:
+        return jsonify({"error": str(e)[:120]}), 400
+    if b"\x00" in head:
+        return jsonify({"error": f"binary file ({size:,} bytes)"}), 400
+
+    MAX_BYTES, MAX_LINES = 600_000, 6000
+    try:
+        raw = target.open("rb").read(MAX_BYTES)
+    except OSError as e:
+        return jsonify({"error": str(e)[:120]}), 400
+    text = raw.decode("utf-8", "replace")
+    lines = text.splitlines()
+    truncated = None
+    if size > MAX_BYTES:
+        truncated = f"first {MAX_BYTES:,} of {size:,} bytes"
+    if len(lines) > MAX_LINES:
+        lines = lines[:MAX_LINES]
+        truncated = f"first {MAX_LINES:,} lines of {text.count(chr(10)) + 1:,}"
+
+    root = FILES_ROOT.resolve()
+    return jsonify({
+        "path": str(target.relative_to(root)).replace("\\", "/"),
+        "lines": lines,
+        "bytes": size,
+        "truncated": truncated,
+    })
+
+
+@app.route("/api/file/raw")
+def api_file_raw():
+    """The file's actual BYTES, for an <img> or an embedded PDF to point at.
+
+    /api/file/read returns text for the viewer; a chart is not text. Same
+    _files_safe guard, and an allow-list of types on top of it — this hands out
+    raw bytes, so it serves pictures and PDFs and nothing else.
+    """
+    target = _files_safe(request.args.get("path", ""))
+    if target is None or not target.exists() or not target.is_file():
+        return jsonify({"error": "not a file"}), 404
+    types = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+        ".pdf": "application/pdf",
+    }
+    mime = types.get(target.suffix.lower())
+    if not mime:
+        return jsonify({"error": "not a viewable type"}), 400
+    return send_file(str(target), mimetype=mime, max_age=0)
+
+
+@app.route("/api/charts")
+def api_charts():
+    """Every image under ?path=, newest first - the chart folder's index.
+
+    One level down as well as the top level, because vigor keeps its dailies in
+    vigor/daily. Not a full walk: that would mean reading HealthData.
+    """
+    raw = request.args.get("path")
+    if raw is None:
+        raw = _pane_cwd_rel(_resolve_session({"session": request.args.get("session")}))
+    target = _files_safe(raw) or FILES_ROOT.resolve()
+    if target.is_file():
+        target = target.parent
+    root = FILES_ROOT.resolve()
+
+    found = []
+
+    def scan(d):
+        try:
+            for e in d.iterdir():
+                if e.name.startswith(".") or e.name in _FILES_SKIP:
+                    continue
+                if e.is_file() and e.suffix.lower() in _IMG_EXT:
+                    found.append(e)
+        except (OSError, PermissionError):
+            pass
+
+    scan(target)
+    try:
+        for e in sorted(target.iterdir()):
+            if e.is_dir() and not e.name.startswith(".") and e.name not in _FILES_SKIP:
+                scan(e)
+    except (OSError, PermissionError):
+        pass
+
+    found.sort(key=lambda f: -f.stat().st_mtime)
+    return jsonify({
+        "path": "" if target == root else str(target.relative_to(root)).replace("\\", "/"),
+        "images": [{
+            "path": str(f.relative_to(root)).replace("\\", "/"),
+            "name": f.name,
+            "mtime": int(f.stat().st_mtime),
+        } for f in found[:120]],
+    })
+
+
+# --- Git panel -------------------------------------------------------------
+# Entirely LOCAL git. No GitHub, no network, no auth — the .git directory is on
+# disk and `git` answers from it. app.py runs on Windows Python, so git.exe is
+# called directly rather than hopping through WSL (faster, and the Windows git
+# reads /mnt/c paths natively as C:\...).
+#
+# Reuses the FILES_ROOT jail: the repo must live under /dev, same as the rail.
+# Only ~8 of the ~115 /dev folders are repos, so "not a repo" is a normal,
+# expected answer and the UI says so plainly rather than erroring.
+_GIT = "git"
+_GIT_TIMEOUT = 20
+
+
+def _git(repo, *args):
+    """Run a git command in `repo`. Returns (rc, stdout)."""
+    try:
+        p = subprocess.run([_GIT, "-C", str(repo), *args],
+                           capture_output=True, timeout=_GIT_TIMEOUT,
+                           encoding="utf-8", errors="replace")
+        return p.returncode, (p.stdout or "")
+    except Exception as e:
+        logging.warning(f"GIT {args[:2]} failed: {e}")
+        return -1, ""
+
+
+def _git_root(path):
+    """The repo containing `path`, or None. Walks up but never past FILES_ROOT."""
+    rc, out = _git(path, "rev-parse", "--show-toplevel")
+    if rc != 0:
+        return None
+    top = out.strip()
+    if not top:
+        return None
+    try:
+        p = Path(top).resolve()
+        root = FILES_ROOT.resolve()
+        return p if (p == root or p.is_relative_to(root)) else None
+    except Exception:
+        return None
+
+
+@app.route("/api/git/status")
+def api_git_status():
+    """Changed files for the repo containing ?path= (or the terminal's cwd)."""
+    raw = request.args.get("path")
+    if raw is None:
+        raw = _pane_cwd_rel(_resolve_session({"session": request.args.get("session")}))
+    target = _files_safe(raw) or FILES_ROOT.resolve()
+    if target.is_file():
+        target = target.parent
+
+    repo = _git_root(target)
+    if repo is None:
+        return jsonify({"repo": None, "files": []})
+
+    rc, out = _git(repo, "status", "--porcelain=v1")
+    files = []
+    for line in out.splitlines():
+        if len(line) < 4:
+            continue
+        code, name = line[:2], line[3:].strip()
+        # Renames read "old -> new"; the new name is the one worth showing.
+        if " -> " in name:
+            name = name.split(" -> ", 1)[1]
+        files.append({"code": code.strip() or "?", "name": name.strip('"')})
+
+    rc, branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+
+    # Per-file line counts, so the list can say HOW MUCH changed and not just
+    # that something did. One numstat call covers every tracked file; untracked
+    # ones have no diff to measure and stay blank.
+    rc, nums = _git(repo, "--no-pager", "diff", "HEAD", "--numstat")
+    stat = {}
+    for line in nums.splitlines():
+        bits = line.split("\t")
+        if len(bits) == 3:
+            add, dele, name = bits
+            stat[name.strip()] = {
+                "add": int(add) if add.isdigit() else 0,
+                "del": int(dele) if dele.isdigit() else 0,
+            }
+    for f in files:
+        f.update(stat.get(f["name"], {}))
+
+    root = FILES_ROOT.resolve()
+    return jsonify({
+        "repo": "" if repo == root else str(repo.relative_to(root)).replace("\\", "/"),
+        "branch": branch.strip() or "?",
+        "files": files[:200],
+    })
+
+
+@app.route("/api/git/summary")
+def api_git_summary():
+    """One-line answer to "where are we in git" for the strip under the rail.
+
+    Branch, how far ahead/behind the upstream, what is staged vs not vs
+    untracked, and the last commit. One porcelain call does the counting —
+    `status --porcelain=v2 --branch` carries the branch and the ahead/behind in
+    its header lines, so this is two git invocations, not five.
+    """
+    raw = request.args.get("path")
+    if raw is None:
+        raw = _pane_cwd_rel(_resolve_session({"session": request.args.get("session")}))
+    target = _files_safe(raw) or FILES_ROOT.resolve()
+    if target.is_file():
+        target = target.parent
+    repo = _git_root(target)
+    if repo is None:
+        return jsonify({"repo": None})
+
+    rc, out = _git(repo, "status", "--porcelain=v2", "--branch")
+    branch, ahead, behind = "?", 0, 0
+    staged = unstaged = untracked = conflicts = 0
+    for line in out.splitlines():
+        if line.startswith("# branch.head"):
+            branch = line.split(" ", 2)[-1].strip()
+        elif line.startswith("# branch.ab"):
+            # "# branch.ab +2 -0"
+            for tok in line.split()[2:]:
+                if tok.startswith("+"):
+                    ahead = int(tok[1:] or 0)
+                elif tok.startswith("-"):
+                    behind = int(tok[1:] or 0)
+        elif line.startswith("?"):
+            untracked += 1
+        elif line.startswith("u "):
+            conflicts += 1
+        elif line[:2] in ("1 ", "2 "):
+            # XY field: index status then worktree status, "." meaning clean.
+            xy = line.split(" ")[1]
+            if xy[0] != ".":
+                staged += 1
+            if len(xy) > 1 and xy[1] != ".":
+                unstaged += 1
+
+    rc, last = _git(repo, "log", "-1", "--format=%h\t%s\t%cr")
+    sha = subject = when = ""
+    if rc == 0 and last.strip():
+        bits = last.strip().split("\t")
+        sha = bits[0] if bits else ""
+        subject = bits[1] if len(bits) > 1 else ""
+        when = bits[2] if len(bits) > 2 else ""
+
+    rc, remote = _git(repo, "remote", "get-url", "origin")
+    remote = remote.strip()
+    root = FILES_ROOT.resolve()
+    return jsonify({
+        "repo": "" if repo == root else str(repo.relative_to(root)).replace("\\", "/"),
+        "branch": branch,
+        "ahead": ahead,
+        "behind": behind,
+        "staged": staged,
+        "unstaged": unstaged,
+        "untracked": untracked,
+        "conflicts": conflicts,
+        "dirty": bool(staged or unstaged or untracked or conflicts),
+        "remote": remote,
+        "github": "github.com" in remote,
+        "last": {"sha": sha, "subject": subject, "when": when},
+    })
+
+
+# gh is installed and already authenticated on this box (patconway34), so the
+# GitHub side needs no token plumbing. Results are cached: `gh` goes over the
+# network and takes ~1s, which is fine on demand and far too slow for the
+# 15-second status poll.
+_GH_CACHE = {}
+_GH_TTL = 120
+
+
+def _gh(repo, *args):
+    try:
+        p = subprocess.run(["gh", *args], cwd=str(repo), capture_output=True,
+                           timeout=12, encoding="utf-8", errors="replace")
+        return p.returncode, (p.stdout or "")
+    except Exception as e:
+        logging.warning(f"GH {args[:2]} failed: {e}")
+        return -1, ""
+
+
+@app.route("/api/git/github")
+def api_git_github():
+    """Open PRs and the latest CI run for the repo containing ?path=.
+
+    Separate from /api/git/summary on purpose: that one is local git and runs
+    on a timer, this one hits the network and runs when asked.
+    """
+    raw = request.args.get("path") or ""
+    base = _files_safe(raw) or FILES_ROOT.resolve()
+    if base.is_file():
+        base = base.parent
+    repo = _git_root(base)
+    if repo is None:
+        return jsonify({"repo": None})
+
+    key = str(repo)
+    hit = _GH_CACHE.get(key)
+    if hit and (time.time() - hit[0]) < _GH_TTL:
+        return jsonify(hit[1])
+
+    out = {"repo": key, "prs": [], "run": None, "error": None}
+
+    rc, js = _gh(repo, "pr", "list", "--limit", "10", "--json",
+                 "number,title,isDraft,headRefName,url")
+    if rc == 0 and js.strip():
+        try:
+            out["prs"] = json.loads(js)
+        except ValueError:
+            pass
+    elif rc != 0:
+        out["error"] = "gh pr list failed"
+
+    rc, js = _gh(repo, "run", "list", "--limit", "1", "--json",
+                 "status,conclusion,displayTitle,workflowName,createdAt,url")
+    if rc == 0 and js.strip():
+        try:
+            runs = json.loads(js)
+            out["run"] = runs[0] if runs else None
+        except ValueError:
+            pass
+
+    _GH_CACHE[key] = (time.time(), out)
+    return jsonify(out)
+
+
+@app.route("/api/git/init", methods=["POST"])
+def api_git_init():
+    """Turn a /dev folder into a git repo. Local only — no remote, no push.
+
+    107 of Patrick's 115 project folders have no repo, which is why the panel
+    offers this: the cost of "git init" is a decision, not a command, and the
+    button removes the decision from the path.
+
+    Deliberately conservative: it refuses if the folder is already inside a
+    repo (so you cannot nest one by accident), writes a .gitignore seeded with
+    the obvious local junk, and makes NO commit — the first commit stays
+    Patrick's to make, with his message.
+    """
+    data = request.get_json() or {}
+    target = _files_safe(data.get("path") or "")
+    if target is None or not target.exists() or not target.is_dir():
+        return jsonify({"error": "not a folder in /dev"}), 400
+    if _git_root(target) is not None:
+        return jsonify({"error": "already inside a git repo"}), 400
+
+    rc, out = _git(target, "init")
+    if rc != 0:
+        return jsonify({"error": "git init failed"}), 500
+
+    gi = target / ".gitignore"
+    if not gi.exists():
+        gi.write_text("\n".join([
+            "# seeded by Spark", ".env", "*.log", "*.pyc", "__pycache__/",
+            ".venv/", "venv/", "node_modules/", "token.json",
+            "credentials.json", "*.sqlite", ".DS_Store", "",
+        ]), encoding="utf-8")
+    _git(target, "branch", "-M", "main")
+    return jsonify({"ok": True, "path": str(target)})
+
+
+@app.route("/api/git/diff")
+def api_git_diff():
+    """Unified diff for one file, or for the whole repo with ?all=1.
+
+    The all-files form is what you want when reviewing what an agent just did:
+    one scroll, every file, headers between them — instead of clicking back and
+    forth through a list.
+    """
+    if request.args.get("all"):
+        raw = request.args.get("path") or ""
+        base = _files_safe(raw) or FILES_ROOT.resolve()
+        if base.is_file():
+            base = base.parent
+        repo = _git_root(base)
+        if repo is None:
+            return jsonify({"error": "not a git repo"}), 400
+        rc, out = _git(repo, "--no-pager", "diff", "HEAD")
+        return jsonify({"file": "(all changes)", "diff": out[:400000]})
+
+    target = _files_safe(request.args.get("path", ""))
+    if target is None:
+        return jsonify({"error": "outside /dev"}), 400
+    repo = _git_root(target if target.is_dir() else target.parent)
+    if repo is None:
+        return jsonify({"error": "not a git repo"}), 400
+
+    rel = str(target.relative_to(repo)).replace("\\", "/")
+    # HEAD -- <file> shows staged AND unstaged together, which is what "what
+    # changed?" means to a human. A bare `git diff` would hide staged edits.
+    rc, out = _git(repo, "--no-pager", "diff", "HEAD", "--", rel)
+    if not out.strip():
+        # Untracked file: no diff exists, so show the content as all-added.
+        rc2, show = _git(repo, "status", "--porcelain=v1", "--", rel)
+        if show.strip().startswith("??"):
+            try:
+                body = target.read_text(encoding="utf-8", errors="replace")
+                out = "".join("+" + l + "\n" for l in body.splitlines()[:600])
+                out = f"(untracked file — showing contents)\n{out}"
+            except Exception:
+                out = "(untracked, unreadable)"
+    return jsonify({"file": rel, "diff": out[:200000]})
 
 
 @app.route("/api/key", methods=["POST"])
@@ -931,6 +1898,8 @@ def listen_me():
     if mode not in ("listen", "vsummary"):
         mode = "listen"
 
+    _t0 = time.time()   # TIMING: grep spark.log for "LISTEN_T"
+
     # Spend guard — must run BEFORE _retrieve_last_turn(), which spawns its own
     # WSL process, and long before the billed call in notify.py.
     guard_key = (sid or "_active", mode)
@@ -962,7 +1931,8 @@ def listen_me():
     tmp, win_tmp = _write_scrollback(text)
 
     # Clean up mp3s from previous listens
-    for old in _SPARK_DIR.glob("_listen_*.mp3"):
+    # Piper writes .wav, gTTS writes .mp3 — sweep both or the wavs pile up.
+    for old in [*_SPARK_DIR.glob("_listen_*.mp3"), *_SPARK_DIR.glob("_listen_*.wav")]:
         try: old.unlink()
         except Exception: pass
 
@@ -973,8 +1943,16 @@ def listen_me():
 
     def _do():
         try:
+            # Piper path: notify.py returns TEXT only and we synthesize here with
+            # the warm voice. Falls back to the original all-in-notify.py gTTS
+            # route whenever the voice is not loaded, so this can never be the
+            # reason Listen stops working.
+            with _piper_lock:
+                use_piper = _piper_voice is not None
+            run_mode = (mode + "_text") if use_piper else mode
+
             result = subprocess.run(
-                [_WIN_PYTHON, "C:/dev/spark/notify.py", mode, win_tmp],
+                [_WIN_PYTHON, "C:/dev/spark/notify.py", run_mode, win_tmp],
                 capture_output=True, timeout=90,
                 encoding="utf-8", errors="replace",
             )
@@ -982,7 +1960,20 @@ def listen_me():
             for line in (result.stdout or "").splitlines():
                 if line.startswith("MP3:"):
                     mp3 = line[4:].strip()
+                elif line.startswith("SUMMARY:") and use_piper:
+                    summary = json.loads(line[8:])
+                    wav = _SPARK_DIR / f"_listen_{job_id}.wav"
+                    if _piper_say(summary, wav):
+                        mp3 = str(wav)
+                    else:
+                        logging.warning("PIPER: synth failed, no audio produced")
             if result.returncode == 0 and mp3:
+                _t_ready = time.time() - _job_start.get(job_id, time.time())
+                for line in (result.stdout or "").splitlines():
+                    if line.startswith("NOTIFY_T:"):   # notify.py's own split
+                        logging.info(f"LISTEN_T job={job_id} {line[9:].strip()}")
+                logging.info(f"LISTEN_T job={job_id} mp3_ready={_t_ready:.2f}s "
+                             f"after button press")
                 logging.info(f"LISTEN OK: {mp3}")
                 _audio_files[job_id] = mp3
                 _text_jobs[job_id] = "ready"
@@ -999,6 +1990,11 @@ def listen_me():
             try: tmp.unlink(missing_ok=True)
             except Exception: pass
 
+    _t_sync = time.time() - _t0
+    logging.info(f"LISTEN_T job={job_id} mode={mode} chars={len(text)} "
+                 f"sync_total={_t_sync:.2f}s <- client BLOCKED this long before "
+                 f"polling even starts")
+    _job_start[job_id] = _t0
     threading.Thread(target=_do, daemon=True).start()
     return jsonify({"ok": True, "job": job_id})
 
@@ -1008,7 +2004,8 @@ def listen_audio(job_id):
     path = _audio_files.get(job_id)
     if not path or not Path(path).exists():
         return jsonify({"error": "Audio not found"}), 404
-    return send_file(path, mimetype="audio/mpeg")
+    mime = "audio/wav" if str(path).lower().endswith(".wav") else "audio/mpeg"
+    return send_file(path, mimetype=mime)
 
 
 @app.route("/api/retry", methods=["POST"])

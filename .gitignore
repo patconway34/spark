@@ -27,3 +27,8 @@ listen_log.txt
 venv/
 env/
 .pytest_cache/
+
+# Local workspace state (per machine) and Piper voice models (61MB)
+_workspaces.json
+_listen_*.wav
+voices/

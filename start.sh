@@ -96,6 +96,14 @@ launch_ttyd() {
         -b "/term/$s" \
         -t scrollback=1000 \
         -t fontSize=14 \
+        `# STAYS 14 - this is what Patrick actually uses and likes (2026-10-01).` \
+        `# Tried 15, then 17, neither ever took effect because that needs a ttyd` \
+        `# relaunch and the terminals were never restarted. Judging the live 14` \
+        `# against big-text's 1.18x zoom, he chose to keep 14 as the default, so` \
+        `# this was set back to match reality instead of leaving a surprise that` \
+        `# would fire on the next restart.` \
+        `# This is the ONLY place terminal font size is set; Spark's CSS cannot` \
+        `# touch it (the terminals are ttyd iframes).` \
         -t enableClipboard=true \
         -t cursorBlink=true \
         -t cursorStyle=bar \

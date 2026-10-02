@@ -9,6 +9,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -1275,6 +1276,61 @@ def api_file_raw():
     return send_file(str(target), mimetype=mime, max_age=0)
 
 
+@app.route("/api/recent")
+def api_recent():
+    """Files by modification time, newest first — the document folder's answer
+    to "what changed here".
+
+    A code folder answers that with a git diff. 33 of Patrick's 115 folders are
+    documents with no repo, and for those the honest equivalent is recency: the
+    I-94 he saved this afternoon, the statement that came in yesterday. Same
+    question, different instrument.
+
+    Top level plus one level down (camino/forms, vigor/daily), not a full walk.
+    """
+    raw = request.args.get("path")
+    if raw is None:
+        raw = _pane_cwd_rel(_resolve_session({"session": request.args.get("session")}))
+    target = _files_safe(raw) or FILES_ROOT.resolve()
+    if target.is_file():
+        target = target.parent
+    root = FILES_ROOT.resolve()
+
+    found = []
+
+    def scan(d):
+        try:
+            for e in d.iterdir():
+                if e.name.startswith(".") or e.name in _FILES_SKIP:
+                    continue
+                if e.is_file():
+                    found.append(e)
+        except (OSError, PermissionError):
+            pass
+
+    scan(target)
+    try:
+        for e in sorted(target.iterdir()):
+            if e.is_dir() and not e.name.startswith(".") and e.name not in _FILES_SKIP:
+                scan(e)
+    except (OSError, PermissionError):
+        pass
+
+    out = []
+    for f in sorted(found, key=lambda x: -x.stat().st_mtime)[:60]:
+        st = f.stat()
+        out.append({
+            "path": str(f.relative_to(root)).replace("\\", "/"),
+            "name": f.name,
+            "mtime": int(st.st_mtime),
+            "size": st.st_size,
+        })
+    return jsonify({
+        "path": "" if target == root else str(target.relative_to(root)).replace("\\", "/"),
+        "files": out,
+    })
+
+
 @app.route("/api/charts")
 def api_charts():
     """Every image under ?path=, newest first - the chart folder's index.
@@ -1404,6 +1460,17 @@ def api_git_status():
             }
     for f in files:
         f.update(stat.get(f["name"], {}))
+        # When was it last written? This is what turns the changed-file list
+        # into an activity feed: an agent working across six files produces a
+        # recency ORDER, and reading that order is useful where being yanked
+        # from file to file is not.
+        try:
+            f["mtime"] = int((repo / f["name"]).stat().st_mtime)
+        except OSError:
+            f["mtime"] = 0
+    # Newest first — the thing the agent touched last is the thing you want to
+    # look at first.
+    files.sort(key=lambda x: -x.get("mtime", 0))
 
     root = FILES_ROOT.resolve()
     return jsonify({
@@ -1545,6 +1612,846 @@ def api_git_github():
 
     _GH_CACHE[key] = (time.time(), out)
     return jsonify(out)
+
+
+@app.route("/api/outline")
+def api_outline():
+    """The symbols in a file — classes, functions, routes — with line numbers.
+
+    Patrick's ask: "if it was a Python file we can even show the functions and
+    how the file is laid out." app.py is 1,700 lines; a 40-row outline is the
+    difference between reading it and navigating it.
+
+    Python goes through `ast`, so the result is exactly right rather than
+    regex-right: nested methods land under their class, and a `def` inside a
+    docstring is not a symbol. Everything else falls back to patterns.
+    """
+    target = _files_safe(request.args.get("path", ""))
+    if target is None or not target.exists() or not target.is_file():
+        return jsonify({"error": "not a file"}), 404
+    try:
+        text = target.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return jsonify({"error": str(e)[:120]}), 400
+
+    syms = []
+    suffix = target.suffix.lower()
+
+    if suffix == ".py":
+        import ast as _ast
+        try:
+            tree = _ast.parse(text)
+        except SyntaxError as e:
+            return jsonify({"symbols": [], "error": f"syntax error line {e.lineno}"})
+
+        def deco(node):
+            # A Flask route is the most useful label in this codebase, so it
+            # gets lifted out of the decorator list and onto the function.
+            for d in getattr(node, "decorator_list", []):
+                src = _ast.unparse(d) if hasattr(_ast, "unparse") else ""
+                m = re.search(r"\.route\(\s*[\"\']([^\"\']+)", src)
+                if m:
+                    return m.group(1)
+            return ""
+
+        def walk(node, depth):
+            for child in node.body:
+                if isinstance(child, _ast.ClassDef):
+                    syms.append({"kind": "class", "name": child.name,
+                                 "line": child.lineno, "depth": depth, "note": ""})
+                    walk(child, depth + 1)
+                elif isinstance(child, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                    syms.append({"kind": "def", "name": child.name,
+                                 "line": child.lineno, "depth": depth,
+                                 "note": deco(child)})
+                elif depth == 0 and isinstance(child, _ast.Assign):
+                    # Module-level constants: the config surface of a file.
+                    for t in child.targets:
+                        if isinstance(t, _ast.Name) and t.id.isupper():
+                            syms.append({"kind": "const", "name": t.id,
+                                         "line": child.lineno, "depth": 0, "note": ""})
+        walk(tree, 0)
+
+    else:
+        pats = [
+            ("def", r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)"),
+            ("def", r"^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\("),
+            ("class", r"^\s*(?:export\s+)?class\s+([A-Za-z_$][\w$]*)"),
+            ("sec", r"^\s*/\*\s*[-=\u2500]*\s*(.{3,60}?)\s*[-=\u2500]*\s*\*/"),
+            ("sec", r"^#{1,3}\s+(.{3,60})$"),
+        ]
+        for i, line in enumerate(text.splitlines(), 1):
+            for kind, pat in pats:
+                m = re.match(pat, line)
+                if m:
+                    syms.append({"kind": kind, "name": m.group(1).strip(),
+                                 "line": i, "depth": 0, "note": ""})
+                    break
+
+    syms.sort(key=lambda x: x["line"])
+    root = FILES_ROOT.resolve()
+    return jsonify({
+        "path": str(target.relative_to(root)).replace("\\", "/"),
+        "symbols": syms[:400],
+    })
+
+
+# folder -> (cache key, result). Key includes the newest mtime of everything
+# scanned, so a single saved file expires it. See api_architecture.
+_ARCH_CACHE = {}
+# folder -> (timestamp, result). Checked BEFORE the directory walk, which is
+# the expensive half; 20s so a save is reflected almost immediately anyway.
+_ARCH_TTL = {}
+
+
+@app.route("/api/architecture")
+def api_architecture():
+    """What SHAPE is this project? Not function names — the parts.
+
+    Patrick's ask: "these are my databases in this folder, these are the pages,
+    these are the APIs" — the thing a file list is bad at showing. So this reads
+    the source for the signals that mark a part, and groups them:
+
+      pages      Flask/FastAPI routes, with the file and line each lives at
+      data       sqlite files, JSON stores, DynamoDB tables, S3 buckets, Postgres
+      cloud      which AWS services the code actually calls (boto3 clients)
+      outbound   external hosts it talks to
+      config     env var names it reads - a project's real configuration surface
+      entry      files you can run (__main__, app.run, a bat/sh launcher)
+
+    Bounded on purpose: top level plus one directory down, at most 120 source
+    files, 250KB each. This runs on a click, not a timer, but it still must not
+    walk node_modules.
+    """
+    raw = request.args.get("path")
+    if raw is None:
+        raw = _pane_cwd_rel(_resolve_session({"session": request.args.get("session")}))
+    target = _files_safe(raw) or FILES_ROOT.resolve()
+    if target.is_file():
+        target = target.parent
+    root = FILES_ROOT.resolve()
+
+    # Measured 2026-10-02 on manna: 2.5s cold, and 2.0s of that was the
+    # DIRECTORY WALK, not the parsing — manna's subfolders hold thousands of
+    # non-source files. So the first cache check has to come before the walk,
+    # keyed on the folder with a short TTL. The mtime-keyed check below still
+    # runs after, and is what guarantees a saved file is picked up: 20 seconds
+    # is the longest this can ever be wrong by.
+    fresh = _ARCH_TTL.get(str(target))
+    if fresh and (time.time() - fresh[0]) < 20:
+        return jsonify(fresh[1])
+
+    SRC = {".py", ".js", ".mjs", ".ts", ".tsx", ".jsx"}
+    files = []
+
+    def gather(d):
+        try:
+            for e in sorted(d.iterdir()):
+                if e.name.startswith(".") or e.name in _FILES_SKIP:
+                    continue
+                if e.is_file() and e.suffix.lower() in SRC:
+                    files.append(e)
+        except (OSError, PermissionError):
+            pass
+
+    SKIP_DIRS = {"transcripts", "customers", "voices", "static", "reference",
+                 "templates", "migrations"}
+
+    def subdirs(d):
+        try:
+            return [e for e in sorted(d.iterdir())
+                    if e.is_dir() and not e.name.startswith(".")
+                    and not e.name.startswith("_")
+                    and e.name not in _FILES_SKIP and e.name not in SKIP_DIRS]
+        except (OSError, PermissionError):
+            return []
+
+    # TWO levels down, not one. A parent folder like revel/ holds whole
+    # projects (atrium, cobre, onyx, porter, scorch), and their source lives a
+    # directory deeper than a single-project scan reaches — which is why
+    # pointing this at revel/ used to find almost nothing.
+    gather(target)
+    for d1 in subdirs(target):
+        gather(d1)
+        for d2 in subdirs(d1):
+            gather(d2)
+    files = files[:400]
+
+    # Cached on the newest mtime in the set, so it is fast on reopen and
+    # CANNOT go stale: edit any scanned file and the key changes, which
+    # invalidates the entry on its own. Nothing to refresh, nothing to
+    # maintain — the architecture is derived from the code every time, never
+    # stored alongside it and never written down to drift.
+    try:
+        stamp = max((f.stat().st_mtime_ns for f in files), default=0)
+    except OSError:
+        stamp = 0
+    ckey = (str(target), len(files), stamp)
+    hit = _ARCH_CACHE.get(str(target))
+    if hit and hit[0] == ckey:
+        return jsonify(hit[1])
+
+    pages, data, cloud, outbound, config, entry = [], {}, {}, {}, {}, []
+    rel = lambda f: str(f.relative_to(root)).replace("\\", "/")
+
+    for f in files:
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")[:250_000]
+        except OSError:
+            continue
+        r = rel(f)
+        for i, line in enumerate(text.splitlines(), 1):
+            # pages / endpoints
+            m = re.search(r"@\w+\.(?:route|get|post|put|delete)\(\s*[\"\']([^\"\']+)", line)
+            if m:
+                verbs = re.findall(r"[\"\'](GET|POST|PUT|DELETE|PATCH)[\"\']", line)
+                pages.append({"path": m.group(1), "file": r, "line": i,
+                              "verbs": verbs or ["GET"]})
+            # data stores
+            for pat, label in (
+                (r"[\"\']([\w./-]+\.(?:sqlite3?|db))[\"\']", "sqlite"),
+                (r"dynamodb[^\n]*?Table\(\s*[\"\']([\w.-]+)", "dynamodb"),
+                (r"resource\(\s*[\"\']dynamodb[\"\'][^\n]*", "dynamodb"),
+                (r"Bucket\s*=\s*[\"\']([\w.-]+)", "s3"),
+                (r"BUCKET\s*=\s*[\"\']([\w.-]+)", "s3"),
+                (r"(postgres(?:ql)?://[^\s\"\']+)", "postgres"),
+                (r"psycopg|asyncpg|SQLAlchemy", "postgres"),
+            ):
+                mm = re.search(pat, line)
+                if mm:
+                    name = mm.group(1) if mm.groups() else label
+                    data.setdefault(label, {}).setdefault(name[:60], r)
+            # local JSON / CSV stores the code writes
+            mm = re.search(r"[\"\']([\w./-]+\.(?:json|jsonl|csv))[\"\']", line)
+            if mm and ("open(" in line or "write" in line or "dump" in line or "Path(" in line):
+                data.setdefault("files", {}).setdefault(mm.group(1)[:60], r)
+            # AWS services actually called
+            mm = re.search(r"(?:client|resource)\(\s*[\"\']([a-z0-9-]+)[\"\']", line)
+            if mm and "boto3" in text:
+                cloud.setdefault(mm.group(1), r)
+            # outbound hosts
+            for mm in re.finditer(r"https?://([a-zA-Z0-9.-]+\.[a-z]{2,})", line):
+                host = mm.group(1).lower()
+                if not host.startswith("localhost"):
+                    outbound.setdefault(host, r)
+            # config surface
+            for mm in re.finditer(r"(?:getenv|environ\.get|environ\[)\s*[\"\']([A-Z0-9_]{3,})", line):
+                config.setdefault(mm.group(1), r)
+        if '__main__' in text or re.search(r"app\.run\(", text):
+            entry.append(r)
+
+    # runnable launchers alongside the source
+    try:
+        for e in target.iterdir():
+            if e.is_file() and e.suffix.lower() in {".bat", ".sh"}:
+                entry.append(rel(e))
+    except (OSError, PermissionError):
+        pass
+
+    # What this project RUNS ON, as opposed to what it calls. boto3 call-sites
+    # cannot see App Runner or RDS — those are deploy-time facts that live in
+    # config files. Found 2026-10-02 when atrium reported one AWS service and
+    # Patrick knew it had more: it does, just not in the Python.
+    INFRA = [
+        ("Dockerfile", "container image", "docker"),
+        ("docker-compose.yml", "local multi-service stack", "docker"),
+        ("apprunner.yaml", "AWS App Runner service", "aws"),
+        ("apprunner.yml", "AWS App Runner service", "aws"),
+        ("template.yaml", "AWS SAM / CloudFormation", "aws"),
+        ("serverless.yml", "Serverless Framework", "aws"),
+        ("cdk.json", "AWS CDK app", "aws"),
+        ("requirements.txt", "python dependencies", "build"),
+        ("package.json", "node dependencies", "build"),
+        ("Procfile", "process definition", "build"),
+    ]
+    infra = []
+    seen_infra = set()
+    scan_roots = [target] + subdirs(target)
+    for d in scan_roots:
+        where = "" if d == target else d.name
+        for fname, what, kind in INFRA:
+            f = d / fname
+            if f.exists() and (where, fname) not in seen_infra:
+                seen_infra.add((where, fname))
+                infra.append({"file": str(f.relative_to(root)).replace("\\", "/"),
+                              "what": what, "kind": kind, "where": where})
+        for pat in ("*.tf", ".github/workflows/*.yml", ".github/workflows/*.yaml"):
+            for f in d.glob(pat):
+                infra.append({"file": str(f.relative_to(root)).replace("\\", "/"),
+                              "what": "terraform" if f.suffix == ".tf" else "CI workflow",
+                              "kind": "aws" if f.suffix == ".tf" else "ci",
+                              "where": where})
+
+    # Per-subproject rollup, so a parent folder reads as a set of services
+    # rather than one undifferentiated pile.
+    subs = {}
+    for f in files:
+        try:
+            rp = f.relative_to(target).parts
+        except ValueError:
+            continue
+        name = rp[0] if len(rp) > 1 else "(root)"
+        subs.setdefault(name, {"name": name, "files": 0})
+        subs[name]["files"] += 1
+    for pg in pages:
+        try:
+            rp = Path(pg["file"]).relative_to(Path(str(target.relative_to(root)).replace("\\", "/")) if target != root else Path(".")).parts
+            name = rp[0] if len(rp) > 1 else "(root)"
+        except Exception:
+            continue
+        if name in subs:
+            subs[name]["routes"] = subs[name].get("routes", 0) + 1
+
+    pages.sort(key=lambda x: x["path"])
+    result = {
+        "path": "" if target == root else str(target.relative_to(root)).replace("\\", "/"),
+        "scanned": len(files),
+        "pages": pages[:200],
+        "data": {k: [{"name": n, "file": f} for n, f in v.items()][:40]
+                 for k, v in data.items()},
+        "cloud": [{"service": k, "file": v} for k, v in sorted(cloud.items())],
+        "outbound": [{"host": k, "file": v} for k, v in sorted(outbound.items())][:40],
+        "config": [{"name": k, "file": v} for k, v in sorted(config.items())][:60],
+        "entry": sorted(set(entry))[:20],
+        "infra": infra[:40],
+        "subprojects": sorted(subs.values(), key=lambda x: -x["files"])[:30],
+    }
+    _ARCH_CACHE[str(target)] = (ckey, result)
+    _ARCH_TTL[str(target)] = (time.time(), result)
+    return jsonify(result)
+
+
+@app.route("/api/coupling")
+def api_coupling():
+    """Measure separation of powers: which parts import which.
+
+    Patrick's ask, and the sharpest one yet: "I would love to have a way to
+    measure how I think so that I can prove how I think." He builds in siloed
+    pieces joined by small bridges — atrium has access/, apply/, connect/,
+    cove/, lantern/, model/, onyx/, quill/, settings/ — and wants that claim
+    testable rather than asserted.
+
+    So: parse every module's imports with `ast`, keep only the ones that
+    resolve INSIDE the project, group each module by its top-level package,
+    and count the edges. Three numbers fall out, and together they are the
+    measurement:
+
+      cohesion   share of import edges that stay inside their own package.
+                 High means the pieces really are pieces.
+      bridges    the specific cross-package edges, each with a count. Few and
+                 thin is separation; many and fat is a monolith in folders.
+      cycles     packages that import each other BOTH ways. This is the one
+                 that falsifies the claim: a two-way edge means neither side
+                 can be understood, moved, or replaced alone.
+
+    A one-way bridge is a decision. A two-way bridge is a leak.
+    """
+    raw = request.args.get("path")
+    if raw is None:
+        raw = _pane_cwd_rel(_resolve_session({"session": request.args.get("session")}))
+    target = _files_safe(raw) or FILES_ROOT.resolve()
+    if target.is_file():
+        target = target.parent
+    root = FILES_ROOT.resolve()
+
+    import ast as _ast
+    mods = {}          # dotted module name -> relative path
+    for f in target.rglob("*.py"):
+        parts = f.relative_to(target).parts
+        if any(p.startswith(".") or p in _FILES_SKIP for p in parts):
+            continue
+        dotted = ".".join(parts)[:-3]
+        mods[dotted] = str(f.relative_to(root)).replace("\\", "/")
+    if not mods:
+        return jsonify({"path": raw, "groups": [], "note": "no python modules"})
+
+    # A top-level NAME is either a package directory (cove/) or a loose module
+    # at the root (mail.py). Those are different groups: cove is a power of its
+    # own, mail.py is part of the root. Conflating them was the first bug here
+    # — it counted root-to-root imports as border crossings.
+    packages = {m.split(".")[0] for m in mods if "." in m}
+    root_mods = {m for m in mods if "." not in m}
+    group_of = lambda m: (m.split(".")[0] if "." in m else "(root)")
+
+    def group_of_import(head):
+        if head in packages:
+            return head
+        if head in root_mods:
+            return "(root)"
+        return None          # third-party or stdlib
+
+    edges = {}         # (from_group, to_group) -> count
+    detail = {}        # (from_group, to_group) -> [file -> module]
+    files_in = {}
+
+    for dotted, relpath in mods.items():
+        g = group_of(dotted)
+        files_in[g] = files_in.get(g, 0) + 1
+        try:
+            tree = _ast.parse((root / relpath).read_text(
+                encoding="utf-8", errors="replace"))
+        except (OSError, SyntaxError):
+            continue
+        for node in _ast.walk(tree):
+            names = []
+            if isinstance(node, _ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, _ast.ImportFrom):
+                if node.level:
+                    # `from . import x` — an import INSIDE the package, which
+                    # is the most common shape in a well-separated codebase.
+                    # Skipping these was the second bug: it drove cohesion to
+                    # zero by throwing away every internal edge.
+                    edges[(g, g)] = edges.get((g, g), 0) + 1
+                    continue
+                if node.module:
+                    names = [node.module]
+            for name in names:
+                tg = group_of_import(name.split(".")[0])
+                if tg is None:
+                    continue
+                key = (g, tg)
+                edges[key] = edges.get(key, 0) + 1
+                if key[0] != key[1]:
+                    detail.setdefault(f"{key[0]}>{key[1]}", []).append(
+                        {"from": relpath, "to": name})
+
+    groups = sorted(files_in, key=lambda g: -files_in[g])
+    internal = sum(v for (a, b), v in edges.items() if a == b)
+    crossing = sum(v for (a, b), v in edges.items() if a != b)
+    total = internal + crossing
+
+    bridges = sorted(
+        [{"from": a, "to": b, "count": v} for (a, b), v in edges.items() if a != b],
+        key=lambda x: -x["count"])
+    pairs = {(b["from"], b["to"]) for b in bridges}
+    cycles = sorted({tuple(sorted((a, b))) for (a, b) in pairs if (b, a) in pairs})
+
+    return jsonify({
+        "path": "" if target == root else str(target.relative_to(root)).replace("\\", "/"),
+        "groups": groups,
+        "files": files_in,
+        "matrix": [[edges.get((a, b), 0) for b in groups] for a in groups],
+        "internal": internal,
+        "crossing": crossing,
+        "cohesion": round(internal / total, 3) if total else None,
+        "bridges": bridges[:60],
+        "cycles": [{"a": a, "b": b} for a, b in cycles],
+        "detail": {k: v[:12] for k, v in detail.items()},
+    })
+
+
+@app.route("/api/links")
+def api_links():
+    """How the services inside one project talk to each other.
+
+    The import matrix is the right instrument INSIDE a service and the wrong
+    one between them: revel's five services share no Python at all, so it
+    scores a perfect 1.0 and tells you nothing. Siloed services talk through
+    other channels, and each channel carries a different cost:
+
+      db      two services on the same database. The heaviest coupling there
+              is — they are joined at the schema, and neither can change a
+              column alone. atrium reading ONYX_DB_URL is this.
+      http    one calls the other's URL. Loose, and the good kind: either side
+              can change internally as long as the contract holds.
+      bucket  shared S3 prefix. Coupled through file format and lifecycle.
+      import  shared Python. Only possible inside one deployable.
+
+    Ownership is inferred from the name: ATRIUM_DB_URL belongs to atrium, so
+    anyone ELSE reading it is a borrower. Crude, and it works because Patrick
+    names things consistently.
+    """
+    raw = request.args.get("path")
+    if raw is None:
+        raw = _pane_cwd_rel(_resolve_session({"session": request.args.get("session")}))
+    target = _files_safe(raw) or FILES_ROOT.resolve()
+    if target.is_file():
+        target = target.parent
+    root = FILES_ROOT.resolve()
+
+    services = []
+    try:
+        for e in sorted(target.iterdir()):
+            if (e.is_dir() and not e.name.startswith((".", "_"))
+                    and e.name not in _FILES_SKIP
+                    and any(e.rglob("*.py"))):
+                services.append(e.name)
+    except (OSError, PermissionError):
+        pass
+    if not services:
+        return jsonify({"path": raw, "services": [], "links": []})
+
+    lower = {s.lower(): s for s in services}
+    found = {}       # (a, b, channel) -> set of evidence
+
+    def note(a, b, channel, ev):
+        if a == b or not a or not b:
+            return
+        found.setdefault((a, b, channel), set()).add(ev)
+
+    owns = {}        # resource name -> owning service (by name prefix)
+
+    for svc in services:
+        for f in (target / svc).rglob("*.py"):
+            if any(p.startswith((".", "_")) or p in _FILES_SKIP for p in f.parts):
+                continue
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")[:250_000]
+            except OSError:
+                continue
+            rel = str(f.relative_to(root)).replace("\\", "/")
+
+            # Database handles, by env var name.
+            for m in re.finditer(r"([A-Z][A-Z0-9_]*_DB_URL|DATABASE_URL)", text):
+                var = m.group(1)
+                head = var.split("_")[0].lower()
+                owner = lower.get(head)
+                if owner:
+                    owns[var] = owner
+                    note(svc, owner, "db", f"{rel} reads {var}")
+
+            # Another service's HTTP surface, by env var or hostname.
+            for m in re.finditer(r"([A-Z][A-Z0-9_]*)_(?:URL|ENDPOINT|BASE)\b", text):
+                head = m.group(1).split("_")[0].lower()
+                owner = lower.get(head)
+                if owner and owner != svc:
+                    note(svc, owner, "http", f"{rel} reads {m.group(0)}")
+            for m in re.finditer(r"https?://([a-z0-9.-]+)", text):
+                host = m.group(1).lower()
+                for key, owner in lower.items():
+                    if owner != svc and re.search(r"(^|[.\-/])" + re.escape(key) + r"([.\-/]|$)", host):
+                        note(svc, owner, "http", f"{rel} calls {host}")
+
+            # Shared buckets.
+            for m in re.finditer(r"[Bb]ucket\s*=\s*[\"\']([\w.-]+)", text):
+                found.setdefault((svc, m.group(1), "bucket"), set()).add(rel)
+
+            # Shared python.
+            for m in re.finditer(r"^\s*(?:from|import)\s+([a-zA-Z_][\w]*)", text, re.M):
+                owner = lower.get(m.group(1).lower())
+                if owner and owner != svc:
+                    note(svc, owner, "import", f"{rel} imports {m.group(1)}")
+
+    # Buckets touched by more than one service become real links.
+    buckets = {}
+    for (a, b, ch), ev in list(found.items()):
+        if ch == "bucket":
+            buckets.setdefault(b, []).append(a)
+            del found[(a, b, ch)]
+    for bucket, users in buckets.items():
+        users = sorted(set(users))
+        for i, a in enumerate(users):
+            for b in users[i + 1:]:
+                note(a, b, "bucket", f"both use {bucket}")
+
+    links = [{"from": a, "to": b, "channel": ch, "evidence": sorted(ev)[:6],
+              "count": len(ev)}
+             for (a, b, ch), ev in found.items()]
+    COST = {"db": 3, "import": 2, "bucket": 1, "http": 0}
+    links.sort(key=lambda x: (-COST.get(x["channel"], 0), -x["count"]))
+
+    shared_db = [l for l in links if l["channel"] == "db"]
+    return jsonify({
+        "path": "" if target == root else str(target.relative_to(root)).replace("\\", "/"),
+        "services": services,
+        "links": links[:80],
+        "owns": owns,
+        "shared_db": len(shared_db),
+        "channels": {ch: sum(1 for l in links if l["channel"] == ch)
+                     for ch in ("db", "import", "bucket", "http")},
+    })
+
+
+@app.route("/api/watch")
+def api_watch():
+    """A cheap fingerprint of "has anything changed", for the live pane.
+
+    Deliberately tiny: this is polled every couple of seconds, so it does one
+    git status and at most one stat, and returns numbers — no diffs, no file
+    contents. The client compares the fingerprint to the last one and only
+    re-fetches the thing that actually moved. If nothing moved, the whole
+    round trip costs a few milliseconds and the UI does nothing at all.
+
+    Nothing here reloads a page. A page reload would throw away scroll
+    position, which sections were expanded, and all seven terminal iframes.
+    """
+    raw = request.args.get("path") or ""
+    base = _files_safe(raw) or FILES_ROOT.resolve()
+    if base.is_file():
+        base = base.parent
+
+    out = {"status": None, "file": None, "last": None}
+
+    repo = _git_root(base)
+    if repo is not None:
+        rc, st = _git(repo, "status", "--porcelain=v1")
+        # A hash, not the listing: the client only needs to know THAT it
+        # differs, and a short int keeps the response tiny.
+        out["status"] = hash(st) & 0xFFFFFFF
+        rc, last = _git(repo, "log", "-1", "--format=%h")
+        out["last"] = last.strip()
+
+    # The open file, if the client named one.
+    want = request.args.get("file")
+    if want:
+        f = _files_safe(want)
+        if f is not None and f.is_file():
+            try:
+                stt = f.stat()
+                out["file"] = {"mtime": stt.st_mtime_ns, "size": stt.st_size}
+            except OSError:
+                pass
+    return jsonify(out)
+
+
+@app.route("/api/git/behavior")
+def api_git_behavior():
+    """Behavioural code analysis — what the git history knows that the code does not.
+
+    Adam Tornhill's instruments (Your Code as a Crime Scene / CodeScene). The
+    code tells you how a system is BUILT; the history tells you how it is
+    actually lived in. Two measurements come out of one log read:
+
+      hotspots          revisions x size. A 1,700-line file nobody touches is
+                        fine; a 300-line file edited every week is where the
+                        bugs and the cost live. Risk is the product, not either
+                        number alone.
+
+      temporal coupling files that change TOGETHER in the same commit. This is
+                        the one nothing else can see: no import links a .py to
+                        a .css, but if they move together 90% of the time they
+                        are coupled in fact. It catches copy-paste, implicit
+                        contracts, and shotgun surgery.
+
+    Two deliberate filters, both standard practice:
+      - commits touching more than 25 files are skipped for COUPLING. A bulk
+        rename or a vendored dependency would otherwise couple everything to
+        everything.
+      - a pair needs at least 3 co-changes before it is reported, so one
+        coincidence is not a finding.
+
+    Coupling degree = co-changes / revisions of the LESS-changed file of the
+    pair. That answers the useful question: "when I touch this, how often must
+    I touch that too?"
+    """
+    raw = request.args.get("path") or ""
+    base = _files_safe(raw) or FILES_ROOT.resolve()
+    if base.is_file():
+        base = base.parent
+    repo = _git_root(base)
+    if repo is None:
+        return jsonify({"repo": None})
+
+    limit = request.args.get("limit", "400")
+    limit = limit if limit.isdigit() and int(limit) <= 2000 else "400"
+
+    rc, out = _git(repo, "--no-pager", "log", f"-{limit}",
+                   "--format=%x1fC%h", "--name-only")
+    if rc != 0:
+        return jsonify({"repo": None})
+
+    commits = []          # list of (sha, [files])
+    cur_sha, cur_files = None, []
+    for line in out.splitlines():
+        if line.startswith("\x1fC"):
+            if cur_sha:
+                commits.append((cur_sha, cur_files))
+            cur_sha, cur_files = line[2:], []
+        elif line.strip():
+            cur_files.append(line.strip())
+    if cur_sha:
+        commits.append((cur_sha, cur_files))
+
+    revs, pairs = {}, {}
+    SKIP = (".min.js", ".lock", ".svg", ".png", ".jpg", ".pdf", ".ico")
+    for sha, fs in commits:
+        fs = [f for f in fs if not f.endswith(SKIP)]
+        for f in fs:
+            revs[f] = revs.get(f, 0) + 1
+        # Bulk commits say nothing about coupling.
+        if 2 <= len(fs) <= 25:
+            uniq = sorted(set(fs))
+            for i, a in enumerate(uniq):
+                for b in uniq[i + 1:]:
+                    pairs[(a, b)] = pairs.get((a, b), 0) + 1
+
+    # Current size, for the hotspot product. Deleted files have no size and
+    # drop out — a file that no longer exists is not a hotspot.
+    # Source and generated data are measured SEPARATELY, and that is not a
+    # detail. Measured on manna 2026-10-02: the top three "hotspots" were
+    # reference/derived/*.json — a 78,000-line generated snapshot swamps every
+    # hand-written file by two orders of magnitude, and nobody maintains it by
+    # hand, so it carries none of the risk the metric is supposed to find.
+    # Real behavioural-analysis tools scope to source for exactly this reason.
+    DATA_EXT = (".json", ".jsonl", ".csv", ".txt", ".tsv", ".xlsx", ".db",
+                ".sqlite", ".log", ".lock")
+    hotspots, data_hot = [], []
+    for f, n in revs.items():
+        p2 = repo / f
+        try:
+            if not p2.is_file():
+                continue
+            lines = sum(1 for _ in p2.open("rb"))
+        except OSError:
+            continue
+        row = {"file": f, "revs": n, "lines": lines, "score": n * lines}
+        (data_hot if f.lower().endswith(DATA_EXT) else hotspots).append(row)
+    hotspots.sort(key=lambda x: -x["score"])
+    data_hot.sort(key=lambda x: -x["score"])
+
+    coupled = []
+    for (a, b), n in pairs.items():
+        if n < 3:
+            continue
+        base_n = min(revs.get(a, 1), revs.get(b, 1))
+        if not base_n:
+            continue
+        coupled.append({"a": a, "b": b, "together": n,
+                        "degree": round(n / base_n, 2),
+                        "a_revs": revs.get(a, 0), "b_revs": revs.get(b, 0)})
+    coupled.sort(key=lambda x: (-x["degree"], -x["together"]))
+
+    root = FILES_ROOT.resolve()
+    return jsonify({
+        "repo": "" if repo == root else str(repo.relative_to(root)).replace("\\", "/"),
+        "commits": len(commits),
+        "hotspots": hotspots[:30],
+        "data_hotspots": data_hot[:12],
+        "coupled": coupled[:30],
+        "files_touched": len(revs),
+    })
+
+
+@app.route("/api/git/activity")
+def api_git_activity():
+    """Commits per day for the last N days, for the little chart in the strip."""
+    raw = request.args.get("path") or ""
+    base = _files_safe(raw) or FILES_ROOT.resolve()
+    if base.is_file():
+        base = base.parent
+    repo = _git_root(base)
+    if repo is None:
+        return jsonify({"repo": None, "days": []})
+
+    days = 30
+    rc, out = _git(repo, "--no-pager", "log", f"--since={days}.days",
+                   "--date=short", "--format=%cd%x1f%h")
+    counts, shas = {}, {}
+    for line in out.splitlines():
+        bits = line.split("\x1f")
+        if len(bits) == 2:
+            counts[bits[0]] = counts.get(bits[0], 0) + 1
+            shas.setdefault(bits[0], []).append(bits[1])
+
+    rc, up = _git(repo, "rev-parse", "--abbrev-ref", "@{u}")
+    unpushed = set()
+    if rc == 0 and up.strip():
+        rc, o2 = _git(repo, "--no-pager", "log", f"{up.strip()}..HEAD", "--format=%h")
+        unpushed = {l.strip() for l in o2.splitlines() if l.strip()}
+
+    from datetime import date, timedelta
+    today = date.today()
+    series = []
+    for i in range(days - 1, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        n = counts.get(d, 0)
+        series.append({
+            "day": d,
+            "n": n,
+            # Any commit that day still only on this disk — drawn as a marker
+            # rather than a second colour (the two-hue pair failed CVD review).
+            "local": any(sh in unpushed for sh in shas.get(d, [])),
+        })
+    total = sum(x["n"] for x in series)
+    return jsonify({"repo": str(repo), "days": series, "total": total,
+                    "window": days})
+
+
+@app.route("/api/git/log")
+def api_git_log():
+    """Recent commits, with the branch/tag refs that point at them.
+
+    The teaching surface. Patrick wants to get better at git, and a list of
+    what has actually happened — with plain labels for which of those commits
+    GitHub has — does more for that than documentation.
+    """
+    raw = request.args.get("path") or ""
+    base = _files_safe(raw) or FILES_ROOT.resolve()
+    if base.is_file():
+        base = base.parent
+    repo = _git_root(base)
+    if repo is None:
+        return jsonify({"repo": None, "commits": []})
+
+    limit = request.args.get("limit", "30")
+    limit = limit if limit.isdigit() and int(limit) <= 200 else "30"
+
+    # %x1f is a unit separator — safe inside commit subjects, unlike a tab.
+    fmt = "%h%x1f%an%x1f%cr%x1f%s%x1f%D"
+    rc, out = _git(repo, "--no-pager", "log", f"-{limit}", f"--format={fmt}")
+    commits = []
+    for line in out.splitlines():
+        bits = line.split("\x1f")
+        if len(bits) < 5:
+            continue
+        commits.append({
+            "sha": bits[0], "author": bits[1], "when": bits[2],
+            "subject": bits[3], "refs": bits[4],
+        })
+
+    # Which of those does the remote already have? Everything from the
+    # upstream's tip backwards. Unpushed commits get flagged so "on my machine
+    # only" is visible rather than inferred.
+    rc, up = _git(repo, "rev-parse", "--abbrev-ref", "@{u}")
+    upstream = up.strip() if rc == 0 else ""
+    unpushed = set()
+    if upstream:
+        rc, out = _git(repo, "--no-pager", "log", f"{upstream}..HEAD", "--format=%h")
+        unpushed = {l.strip() for l in out.splitlines() if l.strip()}
+    for c in commits:
+        c["unpushed"] = c["sha"] in unpushed
+
+    rc, branches = _git(repo, "branch", "-vv", "--all")
+    rc, cur = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    root = FILES_ROOT.resolve()
+    return jsonify({
+        "repo": "" if repo == root else str(repo.relative_to(root)).replace("\\", "/"),
+        "branch": cur.strip(),
+        "upstream": upstream,
+        "commits": commits,
+        "branches": [b.rstrip() for b in branches.splitlines()][:40],
+    })
+
+
+@app.route("/api/git/show")
+def api_git_show():
+    """One commit: its message, its stat, and its full diff."""
+    sha = (request.args.get("sha") or "").strip()
+    if not sha or not all(c in "0123456789abcdefABCDEF" for c in sha):
+        return jsonify({"error": "bad sha"}), 400
+    raw = request.args.get("path") or ""
+    base = _files_safe(raw) or FILES_ROOT.resolve()
+    if base.is_file():
+        base = base.parent
+    repo = _git_root(base)
+    if repo is None:
+        return jsonify({"error": "not a git repo"}), 400
+
+    rc, meta = _git(repo, "--no-pager", "show", "-s",
+                    "--format=%H%x1f%an%x1f%cr%x1f%s%x1f%b", sha)
+    bits = meta.split("\x1f")
+    rc, stat = _git(repo, "--no-pager", "show", "--stat", "--format=", sha)
+    rc, diff = _git(repo, "--no-pager", "show", "--format=", sha)
+    return jsonify({
+        "sha": bits[0].strip() if bits else sha,
+        "author": bits[1] if len(bits) > 1 else "",
+        "when": bits[2] if len(bits) > 2 else "",
+        "subject": bits[3] if len(bits) > 3 else "",
+        "body": bits[4] if len(bits) > 4 else "",
+        "stat": stat.strip(),
+        "diff": diff[:400000],
+    })
 
 
 @app.route("/api/git/init", methods=["POST"])

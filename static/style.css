@@ -1017,10 +1017,10 @@ table.csv tbody tr:hover { background: var(--accent-dim); }
    rather than floating in the viewer, because it belongs to the FOLDER you are
    in, and the rail is the folder. */
 #git-bar {
+    /* Positioning note: this used to be pinned to the bottom of the rail with
+       position:sticky. It now lives inside #sec-git, a flex section, so the
+       section does the placing and this is a plain block. */
     display: none;
-    position: sticky;
-    bottom: 0;
-    margin-top: auto;
     padding: 6px 8px;
     border-top: 1px solid var(--border-strong);
     background: var(--surface-bright);
@@ -1310,3 +1310,489 @@ body.rail-open #file-rail { display: flex; }
     cursor: pointer;
 }
 .gb-init:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+/* ── Git panel (2026-10-02) ────────────────────────────────────────────────
+   Takes the whole middle pane. Built to be learned from: the state section is
+   sentences, not symbols, because "clean ↑5" is only readable once you already
+   know what it means. */
+.gp { font-family: var(--font-sans); font-size: 0.76rem; line-height: 1.5; }
+.gp-state {
+    padding: 10px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border-strong);
+}
+.gp-state p { margin: 0 0 6px; }
+.gp-state p:last-child { margin-bottom: 0; }
+.gp-state b { color: var(--text); }
+.gp-warn { color: var(--accent); font-weight: 600; }
+
+.gp-sec { border-bottom: 1px solid var(--border); }
+.gp-sec summary {
+    padding: 7px 12px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+}
+.gp-sec summary:hover { color: var(--accent); }
+.gp-h {
+    padding: 8px 12px 6px;
+    font-weight: 700;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+}
+.gp-pre {
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    padding: 6px 12px 10px;
+    color: var(--text-dim);
+}
+
+/* History rows. An unpushed commit is marked, because "committed" and "backed
+   up" are different states and the difference is invisible otherwise. */
+.gp-log { font-family: var(--font-mono); font-size: 0.68rem; }
+.gp-c {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 2em;
+    transition: background-color 120ms ease;
+}
+.gp-c:hover { background: var(--surface-bright); }
+.gp-c.unpushed { border-left: 3px solid var(--warning); padding-left: 9px; }
+.gp-sha { flex: 0 0 auto; color: var(--accent); font-weight: 700; }
+.gp-subj { flex: 1 1 auto; min-width: 0; color: var(--text); word-break: break-word; }
+.gp-refs {
+    margin-left: 6px;
+    padding: 0 4px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    font-size: 0.58rem;
+    color: var(--text-dim);
+}
+.gp-when { flex: 0 0 auto; color: var(--text-muted); font-size: 0.62rem; white-space: nowrap; }
+.gp-local {
+    flex: 0 0 auto;
+    color: var(--warning);
+    font-size: 0.58rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+/* One commit's header, above its diff. */
+.gp-commit { padding: 10px 12px; background: var(--surface); border-bottom: 1px solid var(--border-strong); }
+.gp-commit-subj { font-family: var(--font-sans); font-weight: 700; font-size: 0.82rem; margin-bottom: 3px; }
+.gp-commit-body {
+    font-family: var(--font-sans);
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    margin: 7px 0;
+    padding-left: 9px;
+    border-left: 2px solid var(--border-strong);
+}
+.gp-back { margin-top: 8px; color: var(--accent); cursor: pointer; font-size: 0.7rem; font-weight: 600; }
+.gp-back:hover { text-decoration: underline; }
+
+/* Explicit entry point to the git panel, inside the strip. */
+.gb-hist {
+    margin-top: 5px;
+    padding-top: 5px;
+    border-top: 1px solid var(--border);
+    color: var(--accent);
+    font-weight: 600;
+    cursor: pointer;
+}
+.gb-hist:hover { text-decoration: underline; }
+
+/* ── Left column: three stacked sections (2026-10-02) ──────────────────────
+   Files / Outline / Git, with draggable dividers. Files is flex:1 so it
+   absorbs whatever the other two are not using — giving height to Git takes it
+   from the file list, which is exactly the trade Patrick asked for. */
+#file-rail { padding-bottom: 0; }
+.rail-sec { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+/* 2026-10-02, second pass: Files is no longer the greedy one. Patrick: "the
+   file pane can be a lot shorter because I don't mind scrolling through that."
+   It is a picker you scroll; Git and Architecture are things you READ. So
+   Files gets a fixed short height and GIT takes the slack. */
+/* 2026-10-02, third pass. Patrick: "the architecture section can get bigger,
+   the git section can actually be smaller... that's really what I need to
+   learn." So ARCHITECTURE is the greedy one now and Git is sized to exactly
+   what it shows: a chart, a state line, a commit, a link. */
+#sec-files { flex: 0 0 auto; height: 240px; min-height: 70px; }
+#sec-outline { flex: 0 0 auto; height: 150px; }
+#sec-git { flex: 0 0 auto; height: 148px; min-height: 60px; }
+#sec-arch { flex: 1 1 auto; min-height: 120px; }
+#arch-mini { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 4px 0; }
+#rail-list, #outline-list { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+
+.sec-head {
+    flex: 0 0 auto;
+    padding: 5px 8px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.56rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    font-family: var(--font-sans);
+}
+.sec-head span { color: var(--text-muted); font-weight: 400; }
+
+/* The dividers. 6px tall, invisible until hovered. */
+.vsplit {
+    flex: 0 0 6px;
+    margin: -2px 0;
+    cursor: row-resize;
+    background: transparent;
+    position: relative;
+    z-index: 3;
+}
+.vsplit:hover { background: var(--accent-glow); }
+body.vsplitting { cursor: row-resize; user-select: none; }
+
+/* ── Outline ───────────────────────────────────────────────────────────────
+   The file's shape. Indented by nesting depth, so a class's methods sit under
+   it; Flask routes ride along as the most useful label in this codebase. */
+#outline-list { font-family: var(--font-mono); font-size: 0.66rem; }
+.ol-row {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    padding: 3px 8px 3px 7px;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(60, 56, 54, 0.05);
+    white-space: nowrap;
+    transition: background-color 120ms ease;
+}
+.ol-row:hover { background: var(--surface-bright); }
+.ol-icon { flex: 0 0 0.9em; color: var(--text-muted); font-size: 0.9em; }
+.ol-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.ol-class .ol-name { font-weight: 700; }
+.ol-class .ol-icon { color: var(--accent); }
+.ol-const .ol-name { color: var(--text-dim); }
+.ol-note {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: #427b58;
+    font-size: 0.92em;
+}
+.ol-line { flex: 1 0 auto; text-align: right; color: var(--text-muted); font-size: 0.9em; }
+
+/* The flash when the outline jumps you to a line. */
+.fv-line.fv-hit { background: #5f5f3f !important; transition: background-color 400ms ease; }
+
+/* ── Commit chart ──────────────────────────────────────────────────────────
+   Commits per day, 30 days. One series, so no legend — the caption names it.
+   Single hue by necessity, not taste: pushed-vs-local as two colours failed
+   the palette validator (ΔE 13.5 normal-vision, floor is 15), so "not pushed"
+   is a DOT above the bar. Shape survives every kind of colour blindness. */
+#git-chart { flex: 0 0 auto; padding: 6px 8px 2px; }
+.ch { width: 100%; height: 34px; display: block; }
+.ch-bar { fill: #af3a03; }
+.ch-bar:hover { fill: #8f2f02; }
+.ch-dot { fill: #3c3836; }
+.ch-zero { fill: var(--border-strong); }
+.ch-cap {
+    padding-top: 3px;
+    color: var(--text-muted);
+    font-size: 0.56rem;
+    font-family: var(--font-sans);
+}
+#git-bar { position: static; margin-top: 0; flex: 1 1 auto; overflow-y: auto; max-height: none; }
+
+/* ── Architecture (2026-10-02) ─────────────────────────────────────────────
+   Compact in the rail (counts you can glance at), full map in the middle pane
+   where there is room to read it. Nothing here is maintained by hand: it is
+   re-derived from the source on every open, so it cannot drift. */
+.ar-mini-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 8px;
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+}
+.ar-k { color: var(--text-dim); }
+.ar-v { color: var(--text); font-weight: 700; }
+.ar-dim { color: var(--text-muted); }
+.ar-open {
+    padding: 4px 8px 2px;
+    color: var(--accent);
+    font-size: 0.62rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--font-sans);
+}
+.ar-open:hover { text-decoration: underline; }
+
+.ar { font-family: var(--font-sans); font-size: 0.74rem; }
+.ar-sec { border-bottom: 1px solid var(--border-strong); }
+.ar-h {
+    padding: 8px 12px 2px;
+    font-weight: 700;
+    font-size: 0.76rem;
+    color: var(--text);
+}
+.ar-n {
+    color: var(--text-muted);
+    font-weight: 400;
+    font-size: 0.68rem;
+}
+.ar-note { padding: 0 12px 6px; color: var(--text-muted); font-size: 0.66rem; }
+.ar-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 12px;
+    border-top: 1px solid var(--border);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 1.8em;
+    transition: background-color 120ms ease;
+}
+.ar-row:hover { background: var(--surface-bright); }
+.ar-name { flex: 1 1 auto; min-width: 0; word-break: break-all; color: var(--text); }
+.ar-verb {
+    display: inline-block;
+    min-width: 2.6em;
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.9em;
+}
+.ar-file { flex: 0 1 auto; min-width: 0; color: var(--text-muted); font-size: 0.9em; text-align: right; word-break: break-all; }
+.ar-foot { padding: 10px 12px 16px; color: var(--text-muted); font-size: 0.66rem; }
+
+/* ── Architecture tree in the rail (2026-10-02) ────────────────────────────
+   Expandable groups with clickable parts, so the architecture is navigable
+   from the column itself and not only from the full map. Open/closed state per
+   group is remembered — the group you study stays open across tab switches. */
+.arm-head {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    padding: 4px 8px;
+    cursor: pointer;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-sans);
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    transition: background-color 120ms ease;
+}
+.arm-head:hover { color: var(--accent); background: var(--surface-bright); }
+.arm-caret { flex: 0 0 0.7em; transition: transform 120ms ease; color: var(--text-muted); }
+.arm-head.open .arm-caret { transform: rotate(90deg); color: var(--accent); }
+.arm-head.open { color: var(--text); }
+.arm-title { flex: 1 1 auto; min-width: 0; }
+.arm-n { flex: 0 0 auto; font-weight: 400; color: var(--text-muted); }
+
+.arm-list { font-family: var(--font-mono); font-size: 0.63rem; }
+.arm-row {
+    padding: 2px 8px 2px 20px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text);
+    border-bottom: 1px solid rgba(60, 56, 54, 0.04);
+    content-visibility: auto;
+    contain-intrinsic-size: auto 1.5em;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+.arm-row:hover { background: var(--accent-dim); color: var(--accent); }
+
+/* Git shrinks: the commit line loses its second row, the chart loses height. */
+#sec-git #git-chart { padding: 4px 8px 0; }
+#sec-git .ch { height: 26px; }
+#sec-git .gb-last { padding-top: 2px; }
+
+/* ── Separation of powers (2026-10-02) ─────────────────────────────────────
+   An import matrix. One hue, light to dark, because the only thing colour
+   encodes here is magnitude; the diagonal is marked with a ring instead of a
+   second hue, and every cell carries its number, so the chart is readable in
+   greyscale and to any kind of colour vision. */
+.cp { font-family: var(--font-sans); font-size: 0.74rem; }
+.cp-hero {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 12px;
+    border-bottom: 1px solid var(--border-strong);
+}
+.cp-stat { flex: 1 1 110px; min-width: 110px; }
+.cp-num { font-size: 1.6rem; font-weight: 700; line-height: 1.1; color: var(--text); }
+.cp-num.good { color: var(--success); }
+.cp-num.bad { color: var(--danger); }
+.cp-lab { color: var(--text-muted); font-size: 0.66rem; line-height: 1.35; }
+
+.cp-m { border-collapse: collapse; margin: 12px; font-family: var(--font-mono); font-size: 0.64rem; }
+.cp-corner { text-align: left; color: var(--text-muted); font-weight: 400; font-size: 0.58rem; padding: 0 6px 4px 0; }
+.cp-ch { padding: 0 2px 4px; }
+/* Column labels rotate — ten package names across the top do not fit flat. */
+.cp-ch span {
+    display: block;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    color: var(--text-dim);
+    font-weight: 600;
+    max-height: 72px;
+    overflow: hidden;
+}
+.cp-rh {
+    text-align: right;
+    padding: 0 7px 0 0;
+    color: var(--text-dim);
+    font-weight: 600;
+    white-space: nowrap;
+}
+.cp-files { color: var(--text-muted); font-weight: 400; margin-left: 5px; font-size: 0.9em; }
+.cp-c {
+    width: 26px;
+    height: 22px;
+    text-align: center;
+    border: 2px solid var(--surface-bright);   /* the 2px surface gap */
+    color: var(--text);
+    font-weight: 600;
+}
+.cp-c.zero { color: var(--text-muted); background: transparent; }
+/* The ring: a package importing itself, marked by shape not by hue. */
+.cp-c.diag { outline: 2px solid var(--text-dim); outline-offset: -4px; }
+.cp-key { padding: 0 12px 12px; color: var(--text-muted); font-size: 0.66rem; }
+
+.cp-h { padding: 10px 12px 2px; font-weight: 700; font-size: 0.78rem; }
+.cp-note { padding: 0 12px 8px; color: var(--text-muted); font-size: 0.68rem; line-height: 1.45; }
+.cp-b {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 5px 12px;
+    border-top: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+}
+.cp-b.leak { background: #f7dcdc; }
+.cp-edge { flex: 1 1 auto; font-weight: 600; }
+.cp-arrow { color: var(--accent); }
+.cp-count { flex: 0 0 auto; color: var(--text-muted); }
+.cp-bf {
+    padding: 2px 12px 2px 24px;
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+.cp-bf:hover { background: var(--surface-bright); color: var(--accent); }
+.cp-imp { color: var(--text-muted); }
+
+/* Service links — channel badges, ranked worst coupling first. The badge
+   carries the word, so the colour is never the only signal. */
+.lk-ch {
+    flex: 0 0 auto;
+    padding: 0 5px;
+    border-radius: 3px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
+}
+.cp-b.lk-db   { background: #f7dcdc; }
+.cp-b.lk-db   .lk-ch { border-color: var(--danger); color: var(--danger); }
+.cp-b.lk-imp  { background: #f7eeda; }
+.cp-b.lk-imp  .lk-ch { border-color: var(--warning); color: var(--warning); }
+.cp-b.lk-buck .lk-ch { border-color: var(--text-dim); }
+.cp-b.lk-http .lk-ch { border-color: var(--success); color: var(--success); }
+
+/* ── Hotspots & temporal coupling (2026-10-02) ─────────────────────────────
+   Hotspot bars: one series, one hue, magnitude only — the number beside each
+   bar carries the detail so the bar is a shape you scan, not a thing you have
+   to decode. */
+.hs {
+    padding: 6px 12px;
+    border-top: 1px solid var(--border);
+    cursor: pointer;
+    transition: background-color 120ms ease;
+}
+.hs:hover { background: var(--surface-bright); }
+.hs-top { display: flex; align-items: baseline; gap: 10px; }
+.hs-file {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    word-break: break-all;
+    color: var(--text);
+}
+.hs-meta { flex: 0 0 auto; color: var(--text-muted); font-size: 0.62rem; white-space: nowrap; }
+.hs-bar { height: 5px; margin-top: 4px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.hs-bar span { display: block; height: 100%; background: #af3a03; border-radius: 3px; }
+
+/* Coupling rows: the percentage IS the headline, so it leads. */
+.tc {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 12px;
+    border-top: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+}
+.tc-pct {
+    flex: 0 0 3.1em;
+    text-align: right;
+    font-weight: 700;
+    color: var(--text-dim);
+}
+.tc-pct.hot { color: var(--accent); }
+.tc-files { flex: 1 1 auto; min-width: 0; word-break: break-all; }
+.tc-plus { color: var(--text-dim); }
+.tc-n { flex: 0 0 auto; color: var(--text-muted); font-size: 0.6rem; }
+
+/* Live indicator in the git strip. A pane that updates itself has to say so,
+   and has to be stoppable. */
+.gb-live {
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: 0.58rem;
+    cursor: pointer;
+    font-family: var(--font-sans);
+}
+.gb-live.on { color: var(--success); font-weight: 700; }
+.gb-live:hover { text-decoration: underline; }
+
+/* Age on each changed-file row. With the live pane on, this ordering is the
+   agent-activity feed: newest work at the top, nothing yanked. */
+.gwhen {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 0.58rem;
+    white-space: nowrap;
+    min-width: 4.2em;
+    text-align: right;
+}
+
+/* Focus rings for the rows the observer arms. outline costs no layout, so a
+   focused row never shifts the list it is in. */
+[data-armed]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: 2px;
+}
+/* Pointer cursor is applied per-row already; this catches anything armed that
+   was styled without one. */
+[data-armed] { cursor: pointer; }

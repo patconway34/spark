@@ -25,7 +25,7 @@
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=8.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=9.3">
     <!-- UI colors from theme.json (overrides style.css :root). Edit theme.json,
          restart the Spark app, and refresh to recolor the chrome. -->
     <style>
@@ -67,12 +67,34 @@
     <div id="sheet-body"></div>
 </div>
 
+<!-- The left column is three stacked sections — Files, Outline, Git — with
+     draggable dividers between them. Patrick: "we could give up some space on
+     the files if we needed something on the bottom there." Files takes
+     whatever the other two do not, and the two heights persist. -->
 <div id="file-rail">
-    <div id="rail-head">/dev</div>
-    <div id="rail-list"></div>
-    <!-- Git strip, pinned to the bottom of the file pane: branch, ahead/behind,
-         what is uncommitted, last commit. Tap it for the full Changes view. -->
-    <div id="git-bar" onclick="showGit()" title="Open Changes"></div>
+    <div class="rail-sec" id="sec-files">
+        <div id="rail-head">/dev</div>
+        <div id="rail-list"></div>
+    </div>
+
+    <div class="vsplit" id="vsplit-outline"></div>
+    <div class="rail-sec" id="sec-outline" style="display:none;">
+        <div class="sec-head">OUTLINE <span id="outline-count"></span></div>
+        <div id="outline-list"></div>
+    </div>
+
+    <div class="vsplit" id="vsplit-git"></div>
+    <div class="rail-sec" id="sec-git">
+        <div class="sec-head">GIT</div>
+        <div id="git-chart"></div>
+        <div id="git-bar" onclick="showGit()" title="Open Changes"></div>
+    </div>
+
+    <div class="vsplit" id="vsplit-arch"></div>
+    <div class="rail-sec" id="sec-arch">
+        <div class="sec-head">ARCHITECTURE</div>
+        <div id="arch-mini"></div>
+    </div>
 </div>
 
 {% for s in sessions %}
@@ -145,6 +167,7 @@
                 <button id="rail-btn" class="btn key-btn" onclick="toggleRail()">&#128193; Files</button>
                 <button class="btn key-btn" onclick="showGit()">&#9095; Changes</button>
                 <button class="btn key-btn" onclick="showCharts()">&#128202; Charts</button>
+                <button class="btn key-btn" onclick="showGitPanel()">&#9095; Git</button>
             </div>
             <div class="ham-row">
                 <button class="btn key-btn" onclick="saveScreenshot()">&#128247; Save</button>
@@ -1005,6 +1028,7 @@ async function loadRail(path) {
     // middle pane shows: a code folder has diffs, a chart folder has pictures.
     const KIND_ICON = {code: '⌨️', info: '📄', charts: '📊'};
     loadGitBar();
+    loadArch();
     const head = document.getElementById('rail-head');
     head.textContent = (KIND_ICON[_railKind] || '') + ' ' + (d.path || '/dev');
     head.title = 'Change project';
@@ -1274,6 +1298,11 @@ async function showGit() {
             (f.add === undefined ? '' :
                 '<span class="git-stat"><span class="dstat-add">+' + f.add +
                 '</span> <span class="dstat-del">−' + f.del + '</span></span>') +
+            // When it was last written. With live refresh on, this row order
+            // IS the agent's activity feed — newest work at the top, and you
+            // choose what to open instead of being dragged to it.
+            (f.mtime ? '<span class="gwhen">' +
+                AGO(Date.now() / 1000 - f.mtime) + '</span>' : '') +
             '<span class="gopen" title="Open in editor">↗</span>';
 
         const pane = document.createElement('div');
@@ -1616,6 +1645,7 @@ async function showFile(relPath) {
         const n = i + 1;
         const el = document.createElement('div');
         el.className = 'fv-line';
+        el.dataset.line = n;          // the outline jumps to these
         const num = document.createElement('span');
         num.className = 'fv-num';
         num.textContent = n;
@@ -1640,23 +1670,9 @@ async function showFile(relPath) {
     body.appendChild(pre);
     document.getElementById('sheet-title').textContent =
         d.path + '  ·  ' + d.lines.length + ' lines';
+    loadOutline(d.path);
 }
 
-
-// One file's diff on its own, for callers outside the Changes accordion.
-async function showDiff(relPath) {
-    openSheet(relPath);
-    const body = document.getElementById('sheet-body');
-    body.textContent = 'Loading...';
-    try {
-        const d = await (await fetch('/api/git/diff?path=' + encodeURIComponent(relPath))).json();
-        if (d.error) { body.textContent = d.error; return; }
-        body.innerHTML = '';
-        renderHunks(d.diff || '(no changes)', body);
-    } catch (e) {
-        body.textContent = 'Could not load diff';
-    }
-}
 
 function toggleRail() {
     const btn = document.getElementById('rail-btn');
@@ -1708,6 +1724,790 @@ async function openProject(name) {
     paneDefault();
     setStatus(name);
 }
+
+
+// --- Outline ---------------------------------------------------------------
+// The file's shape: classes, functions, module constants, and for this
+// codebase the Flask route each handler serves. app.py is 1,700 lines; a
+// 133-row outline is the difference between reading it and navigating it.
+// Symbols come from Python's own `ast` server-side, so they are exactly right
+// rather than regex-right.
+let _outlineFor = null;
+
+async function loadOutline(relPath) {
+    const sec = document.getElementById('sec-outline');
+    const list = document.getElementById('outline-list');
+    if (!sec || !list) return;
+    // Only code has a shape worth listing. A PDF or a chart does not.
+    if (!/\.(py|js|mjs|ts|tsx|jsx|html|css|sh|md)$/i.test(relPath || '')) {
+        sec.style.display = 'none';
+        _outlineFor = null;
+        return;
+    }
+    let d;
+    try {
+        d = await (await fetch('/api/outline?path=' + encodeURIComponent(relPath))).json();
+    } catch (e) { sec.style.display = 'none'; return; }
+    if (!d.symbols || !d.symbols.length) { sec.style.display = 'none'; return; }
+
+    _outlineFor = relPath;
+    sec.style.display = 'flex';
+    const count = document.getElementById('outline-count');
+    if (count) count.textContent = d.symbols.length;
+    list.innerHTML = '';
+    const ICON = {class: '◆', def: 'ƒ', const: '▪', sec: '§'};
+    d.symbols.forEach(sym => {
+        const row = document.createElement('div');
+        row.className = 'ol-row ol-' + sym.kind;
+        row.style.paddingLeft = (7 + sym.depth * 11) + 'px';
+        row.innerHTML =
+            '<span class="ol-icon">' + (ICON[sym.kind] || '') + '</span>' +
+            '<span class="ol-name">' + esc(sym.name) + '</span>' +
+            (sym.note ? '<span class="ol-note">' + esc(sym.note) + '</span>' : '') +
+            '<span class="ol-line">' + sym.line + '</span>';
+        row.onclick = () => jumpToLine(relPath, sym.line);
+        list.appendChild(row);
+    });
+}
+
+// Jump the viewer to a line. If the viewer is showing something else, open the
+// right file first, then jump.
+async function jumpToLine(relPath, line) {
+    const showing = document.getElementById('sheet-title');
+    if (!showing || showing.textContent.indexOf(relPath) !== 0) {
+        await showFile(relPath);
+    }
+    const el = document.querySelector('.fv-line[data-line="' + line + '"]');
+    if (!el) return;
+    el.scrollIntoView({block: 'center', behavior: 'smooth'});
+    // A brief flash, because scrolling to a line and not marking it leaves you
+    // hunting for which one it was.
+    el.classList.add('fv-hit');
+    setTimeout(() => el.classList.remove('fv-hit'), 1400);
+}
+
+// --- The commit chart ------------------------------------------------------
+// Commits per day, 30 days, in the git section. Form: magnitude over time, one
+// series, so bars and NO legend (the caption names it).
+//
+// One hue on purpose. The obvious design was pushed-vs-local as two colours,
+// and the palette validator killed it: #af3a03 against #b57614 scores ΔE 13.5
+// for normal vision, below the 15 floor — hard to tell apart even with full
+// colour vision. Every teal that separated cleanly fell under the chroma floor
+// and read gray. So local-only commits are marked with a DOT above the bar,
+// which is a shape difference and survives any kind of colour blindness.
+async function loadGitChart(repo) {
+    const slot = document.getElementById('git-chart');
+    if (!slot) return;
+    let a;
+    try {
+        a = await (await fetch('/api/git/activity?path=' + encodeURIComponent(repo || ''))).json();
+    } catch (e) { slot.innerHTML = ''; return; }
+    if (!a.days || !a.days.length) { slot.innerHTML = ''; return; }
+
+    const W = 200, H = 34, n = a.days.length;
+    const gap = 1.6, bw = (W - gap * (n - 1)) / n;
+    const max = Math.max(1, ...a.days.map(d => d.n));
+    let bars = '';
+    a.days.forEach((d, i) => {
+        const x = i * (bw + gap);
+        if (d.n) {
+            // 4px rounded data-end, anchored to the baseline.
+            const h = Math.max(3, (d.n / max) * (H - 8));
+            bars += '<rect x="' + x.toFixed(2) + '" y="' + (H - h).toFixed(2) +
+                    '" width="' + bw.toFixed(2) + '" height="' + h.toFixed(2) +
+                    '" rx="1.6" class="ch-bar"><title>' + d.day + ': ' + d.n +
+                    ' commit' + (d.n > 1 ? 's' : '') +
+                    (d.local ? ' (not pushed)' : '') + '</title></rect>';
+            if (d.local) {
+                bars += '<circle cx="' + (x + bw / 2).toFixed(2) + '" cy="2.2" r="2" class="ch-dot"><title>' +
+                        d.day + ': has unpushed commits</title></circle>';
+            }
+        } else {
+            // Empty days stay visible as a baseline tick — a gap you can see
+            // is information; a gap you cannot is just a shorter chart.
+            bars += '<rect x="' + x.toFixed(2) + '" y="' + (H - 1) + '" width="' +
+                    bw.toFixed(2) + '" height="1" class="ch-zero"></rect>';
+        }
+    });
+    const last = a.days.filter(d => d.n).pop();
+    slot.innerHTML =
+        '<svg viewBox="0 0 ' + W + ' ' + H + '" class="ch" preserveAspectRatio="none">' +
+        bars + '</svg>' +
+        '<div class="ch-cap">' + a.total + ' commit' + (a.total === 1 ? '' : 's') +
+        ' in ' + a.window + ' days' + (last ? ' · last ' + last.day.slice(5) : '') +
+        '</div>';
+}
+
+
+// --- Architecture ----------------------------------------------------------
+// The project's SHAPE, which is the thing a file list is worst at showing.
+// Not function names — parts: the pages it serves, the data it keeps, the AWS
+// services it calls, who it talks to, what it reads from the environment, and
+// what you can actually run.
+//
+// Derived from the source on every open and cached server-side on the newest
+// mtime of the files it scanned. So there is nothing to keep updated: save a
+// file and the cache key changes. An architecture doc you maintain by hand
+// drifts within a week; this one cannot.
+let _arch = null;
+
+async function loadArch() {
+    const slot = document.getElementById('arch-mini');
+    if (!slot) return;
+    const folder = _ws.folder || _railPath || '';
+    slot.innerHTML = '<div class="ar-mini-row ar-dim">reading…</div>';
+    let d;
+    try {
+        d = await (await fetch('/api/architecture?path=' + encodeURIComponent(folder))).json();
+    } catch (e) { slot.innerHTML = ''; return; }
+    _arch = d;
+    renderArchMini(d);
+}
+
+// The rail's architecture section is a TREE now, not a row of counts: groups
+// you expand, items you click. Patrick: "that's really what I need to learn" —
+// so the parts are reachable from the column itself, and the open/closed state
+// of each group is remembered.
+function renderArchMini(d) {
+    const slot = document.getElementById('arch-mini');
+    slot.innerHTML = '';
+
+    const groups = [];
+
+    // A parent folder (revel/) is a set of SERVICES, not one project. When the
+    // scan finds more than one subproject with source in it, that is the first
+    // thing worth seeing — it is the shape of the whole thing.
+    const subs = (d.subprojects || []).filter(x => x.name !== '(root)');
+    if (subs.length > 1) {
+        groups.push(['subs', 'SERVICES', subs.map(x => ({
+            label: x.name + '  ' + x.files + ' files' +
+                   (x.routes ? ', ' + x.routes + ' routes' : ''),
+            file: '',
+        }))]);
+    }
+
+    const pages = (d.pages || []).map(p => ({
+        label: p.verbs.join('/') + ' ' + p.path, file: p.file, line: p.line,
+    }));
+    if (pages.length) groups.push(['pages', 'PAGES', pages]);
+
+    const LABELS = {sqlite: 'SQLITE', dynamodb: 'DYNAMODB', s3: 'S3',
+                    postgres: 'POSTGRES', files: 'FILE STORES'};
+    Object.keys(d.data || {}).forEach(k => {
+        const rows = d.data[k].map(x => ({label: x.name, file: x.file}));
+        if (rows.length) groups.push(['data-' + k, LABELS[k] || k.toUpperCase(), rows]);
+    });
+    if ((d.cloud || []).length) {
+        groups.push(['aws', 'AWS SERVICES',
+            d.cloud.map(c => ({label: c.service, file: c.file}))]);
+    }
+    if ((d.outbound || []).length) {
+        groups.push(['out', 'TALKS TO',
+            d.outbound.map(o => ({label: o.host, file: o.file}))]);
+    }
+    if ((d.config || []).length) {
+        groups.push(['cfg', 'CONFIG (env)',
+            d.config.map(c => ({label: c.name, file: c.file}))]);
+    }
+    if ((d.entry || []).length) {
+        groups.push(['run', 'RUNNABLE', d.entry.map(e => ({label: e, file: e}))]);
+    }
+    // What it RUNS ON. boto3 call-sites cannot see App Runner or RDS; those
+    // live in Dockerfiles and workflows, so they are read from the filenames.
+    if ((d.infra || []).length) {
+        groups.push(['infra', 'RUNS ON', d.infra.map(i => ({
+            label: (i.where ? i.where + ': ' : '') + i.what, file: i.file,
+        }))]);
+    }
+
+    if (!groups.length) {
+        slot.innerHTML = '<div class="ar-mini-row ar-dim">no structure found in ' +
+                         d.scanned + ' files</div>';
+        return;
+    }
+
+    groups.forEach(([key, title, rows]) => {
+        const open = (() => {
+            try { return localStorage.getItem('spark.arch.' + key) === '1'; }
+            catch (e) { return false; }
+        })();
+
+        const head = document.createElement('div');
+        head.className = 'arm-head' + (open ? ' open' : '');
+        head.innerHTML = '<span class="arm-caret">▸</span>' +
+                         '<span class="arm-title">' + esc(title) + '</span>' +
+                         '<span class="arm-n">' + rows.length + '</span>';
+
+        const list = document.createElement('div');
+        list.className = 'arm-list';
+        list.style.display = open ? 'block' : 'none';
+        rows.forEach(r => {
+            const el = document.createElement('div');
+            el.className = 'arm-row';
+            el.innerHTML = '<span class="arm-label">' + esc(r.label) + '</span>';
+            el.title = r.label + (r.file ? '  —  ' + r.file + (r.line ? ':' + r.line : '') : '');
+            if (r.file) el.onclick = () => (r.line ? jumpToLine(r.file, r.line) : showFile(r.file));
+            list.appendChild(el);
+        });
+
+        head.onclick = () => {
+            const nowOpen = list.style.display === 'none';
+            list.style.display = nowOpen ? 'block' : 'none';
+            head.classList.toggle('open', nowOpen);
+            try { localStorage.setItem('spark.arch.' + key, nowOpen ? '1' : '0'); } catch (e) {}
+        };
+
+        slot.appendChild(head);
+        slot.appendChild(list);
+    });
+
+    // Two instruments, and which one is right depends on the folder: imports
+    // inside a service, channels between services.
+    if (subs.length > 1) {
+        const lk = document.createElement('div');
+        lk.className = 'ar-open';
+        lk.textContent = 'how the services talk ›';
+        lk.onclick = () => showLinks();
+        slot.appendChild(lk);
+    }
+
+    const sep = document.createElement('div');
+    sep.className = 'ar-open';
+    sep.textContent = 'separation of powers ›';
+    sep.onclick = () => showCoupling();
+    slot.appendChild(sep);
+
+    const open = document.createElement('div');
+    open.className = 'ar-open';
+    open.textContent = 'open the full map ›';
+    open.onclick = () => showArch();
+    slot.appendChild(open);
+}
+
+// The full map, in the middle pane where there is room to read it.
+function showArch() {
+    if (!_arch) return;
+    const d = _arch;
+    openSheet((d.path || '/dev') + ' · architecture');
+    const body = document.getElementById('sheet-body');
+    body.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'ar';
+
+    const jump = (file, line) => () => (line ? jumpToLine(file, line) : showFile(file));
+
+    const section = (title, note, rows) => {
+        if (!rows.length) return;
+        const sec = document.createElement('div');
+        sec.className = 'ar-sec';
+        sec.innerHTML = '<div class="ar-h">' + esc(title) +
+                        ' <span class="ar-n">' + rows.length + '</span></div>' +
+                        (note ? '<div class="ar-note">' + esc(note) + '</div>' : '');
+        rows.forEach(r => {
+            const el = document.createElement('div');
+            el.className = 'ar-row';
+            el.innerHTML = '<span class="ar-name">' + r.label + '</span>' +
+                           '<span class="ar-file">' + esc(r.file || '') + '</span>';
+            if (r.file) el.onclick = jump(r.file, r.line);
+            sec.appendChild(el);
+        });
+        wrap.appendChild(sec);
+    };
+
+    // Pages, grouped by their first path segment — /api/git/* reads as one
+    // area rather than nine unrelated rows.
+    const groups = {};
+    (d.pages || []).forEach(p => {
+        const seg = p.path.split('/').filter(Boolean).slice(0, 2).join('/') || '/';
+        (groups[seg] = groups[seg] || []).push(p);
+    });
+    const pageRows = [];
+    Object.keys(groups).sort().forEach(g => {
+        groups[g].forEach(p => pageRows.push({
+            label: '<span class="ar-verb">' + esc(p.verbs.join('/')) + '</span> ' + esc(p.path),
+            file: p.file, line: p.line,
+        }));
+    });
+    section('Pages & endpoints', 'what this project serves', pageRows);
+
+    const LABELS = {sqlite: 'SQLite', dynamodb: 'DynamoDB', s3: 'S3',
+                    postgres: 'Postgres', files: 'Local files'};
+    Object.keys(d.data || {}).forEach(k => {
+        section('Data — ' + (LABELS[k] || k),
+                k === 'files' ? 'JSON/CSV the code reads or writes' : '',
+                d.data[k].map(x => ({label: esc(x.name), file: x.file})));
+    });
+
+    section('Services in this folder', 'each subfolder with source of its own',
+            (d.subprojects || []).filter(x => x.name !== '(root)').map(x => ({
+                label: '<b>' + esc(x.name) + '</b> — ' + x.files + ' files' +
+                       (x.routes ? ', ' + x.routes + ' routes' : ''),
+                file: '',
+            })));
+    section('Runs on', 'deploy-time facts, read from config files rather than code',
+            (d.infra || []).map(i => ({
+                label: (i.where ? '<b>' + esc(i.where) + '</b> — ' : '') + esc(i.what),
+                file: i.file,
+            })));
+    section('AWS services called', 'from boto3 clients in the source',
+            (d.cloud || []).map(c => ({label: esc(c.service), file: c.file})));
+    section('Talks to', 'external hosts referenced in the code',
+            (d.outbound || []).map(o => ({label: esc(o.host), file: o.file})));
+    section('Configuration', 'environment variables this project reads',
+            (d.config || []).map(c => ({label: esc(c.name), file: c.file})));
+    section('Runnable', 'entry points and launchers',
+            (d.entry || []).map(e => ({label: esc(e), file: e})));
+
+    const foot = document.createElement('div');
+    foot.className = 'ar-foot';
+    foot.textContent = 'Read from ' + d.scanned +
+        ' source files just now — derived, not stored, so it cannot go stale.';
+    wrap.appendChild(foot);
+    body.appendChild(wrap);
+}
+
+
+// --- Separation of powers --------------------------------------------------
+// Patrick builds in siloed pieces joined by small bridges and wanted that
+// claim measured instead of asserted. The measurement is an import matrix:
+// packages down the side, packages across the top, each cell the number of
+// import edges from row to column. The diagonal is work staying home; every
+// off-diagonal cell is a border crossing.
+//
+// Form choice: a matrix, not a node-link diagram. At this size (10 packages) a
+// matrix is exact and readable — you can count the bridges — where a web of
+// arrows is a picture of a hairball. Magnitude gets ONE hue, light to dark,
+// which is what sequential data takes; the diagonal is marked by a ring rather
+// than a second colour, so the only thing hue encodes is "how much".
+const COUP_RAMP = ['#fdf0d5', '#f7ddb0', '#eab676', '#d1702c', '#af3a03'];
+
+async function showCoupling() {
+    const folder = _ws.folder || _railPath || '';
+    openSheet('Separation of powers');
+    const body = document.getElementById('sheet-body');
+    body.textContent = 'Reading imports…';
+    let d;
+    try {
+        d = await (await fetch('/api/coupling?path=' + encodeURIComponent(folder))).json();
+    } catch (e) { body.textContent = 'Could not read imports'; return; }
+    if (!d.groups || d.groups.length < 2) {
+        body.innerHTML = '<div class="cp-note">' +
+            esc(d.path || folder) + ' has ' +
+            ((d.groups || []).length === 1 ? 'one package' : 'no python packages') +
+            ' — nothing to separate yet.</div>';
+        return;
+    }
+
+    document.getElementById('sheet-title').textContent =
+        (d.path || '/dev') + ' · separation of powers';
+    body.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'cp';
+
+    // The headline. Cohesion is the share of imports that never leave their
+    // own package, so it is literally "how much of the work stays home".
+    const pct = d.cohesion === null ? '—' : Math.round(d.cohesion * 100) + '%';
+    const leaks = (d.cycles || []).length;
+    wrap.innerHTML =
+        '<div class="cp-hero">' +
+          '<div class="cp-stat"><div class="cp-num">' + pct + '</div>' +
+            '<div class="cp-lab">of imports stay inside their own package</div></div>' +
+          '<div class="cp-stat"><div class="cp-num">' + (d.bridges || []).length + '</div>' +
+            '<div class="cp-lab">bridges between packages</div></div>' +
+          '<div class="cp-stat"><div class="cp-num ' + (leaks ? 'bad' : 'good') + '">' +
+            leaks + '</div><div class="cp-lab">two-way couplings' +
+            (leaks ? '' : ' — every bridge runs one way') + '</div></div>' +
+        '</div>';
+
+    // The matrix.
+    const g = d.groups, m = d.matrix;
+    const max = Math.max(1, ...m.flat());
+    const step = (v) => v === 0 ? -1 :
+        Math.min(COUP_RAMP.length - 1, Math.floor((v / max) * COUP_RAMP.length));
+    let html = '<table class="cp-m"><thead><tr><th class="cp-corner">imports →</th>';
+    g.forEach(c => html += '<th class="cp-ch"><span>' + esc(c) + '</span></th>');
+    html += '</tr></thead><tbody>';
+    g.forEach((rname, i) => {
+        html += '<tr><th class="cp-rh">' + esc(rname) +
+                '<span class="cp-files">' + (d.files[rname] || 0) + '</span></th>';
+        g.forEach((cname, j) => {
+            const v = m[i][j], s = step(v);
+            const diag = i === j;
+            const bg = s < 0 ? 'transparent' : COUP_RAMP[s];
+            const dark = s >= 3;
+            html += '<td class="cp-c' + (diag ? ' diag' : '') + (v ? '' : ' zero') +
+                    '" style="background:' + bg + (dark ? ';color:#fff' : '') + '"' +
+                    ' title="' + esc(rname) + ' imports ' + esc(cname) + ': ' + v +
+                    (diag ? ' (inside itself)' : ' (crossing)') + '">' +
+                    (v || '') + '</td>';
+        });
+        html += '</tr>';
+    });
+    html += '</tbody></table>' +
+        '<div class="cp-key">Darker = more imports. A ringed cell is a package ' +
+        'importing itself. Everything off the diagonal is a border crossing.</div>';
+
+    // The bridges, named, with the files that make them.
+    if ((d.bridges || []).length) {
+        html += '<div class="cp-h">The bridges</div>' +
+                '<div class="cp-note">Each one is a deliberate connection. ' +
+                'Thin and one-way is separation; fat or two-way is a leak.</div>';
+        d.bridges.forEach(b => {
+            const key = b.from + '>' + b.to;
+            const files = (d.detail || {})[key] || [];
+            html += '<div class="cp-b"><span class="cp-edge">' + esc(b.from) +
+                    ' <span class="cp-arrow">→</span> ' + esc(b.to) + '</span>' +
+                    '<span class="cp-count">' + b.count + '</span></div>';
+            files.slice(0, 6).forEach(f => {
+                html += '<div class="cp-bf" data-file="' + esc(f.from) + '">' +
+                        esc(f.from) + '<span class="cp-imp">imports ' + esc(f.to) +
+                        '</span></div>';
+            });
+        });
+    }
+    if (leaks) {
+        html += '<div class="cp-h">Two-way couplings</div>' +
+                '<div class="cp-note">These two import each other, so neither can ' +
+                'be read, moved or replaced on its own.</div>';
+        d.cycles.forEach(c => {
+            html += '<div class="cp-b leak"><span class="cp-edge">' + esc(c.a) +
+                    ' <span class="cp-arrow">⇄</span> ' + esc(c.b) + '</span></div>';
+        });
+    }
+
+    wrap.innerHTML += html;
+    body.appendChild(wrap);
+    // Bridge files open in the viewer.
+    wrap.querySelectorAll('.cp-bf').forEach(el => {
+        el.onclick = () => showFile(el.dataset.file);
+    });
+}
+
+
+// --- Service links ---------------------------------------------------------
+// Inside one project, between its services. The channel is the whole point,
+// because each one costs something different to live with:
+//   db      same database — joined at the schema, neither side can change a
+//           column alone. The heaviest coupling in service design.
+//   import  shared Python — only possible inside one deployable.
+//   bucket  shared S3 prefix — coupled through file format and lifecycle.
+//   http    one calls the other's URL — the loose, good kind.
+// Ranked worst-first, so the thing worth fixing is at the top.
+const CH_META = {
+    db:     {label: 'same database', cost: 'heaviest', cls: 'lk-db'},
+    import: {label: 'shared code', cost: 'heavy', cls: 'lk-imp'},
+    bucket: {label: 'shared bucket', cost: 'medium', cls: 'lk-buck'},
+    http:   {label: 'HTTP call', cost: 'loose', cls: 'lk-http'},
+};
+
+async function showLinks() {
+    const folder = _ws.folder || _railPath || '';
+    openSheet('Service links');
+    const body = document.getElementById('sheet-body');
+    body.textContent = 'Reading…';
+    let d;
+    try {
+        d = await (await fetch('/api/links?path=' + encodeURIComponent(folder))).json();
+    } catch (e) { body.textContent = 'Could not read links'; return; }
+    if (!d.services || d.services.length < 2) {
+        body.innerHTML = '<div class="cp-note">' + esc(d.path || folder) +
+            ' has fewer than two services — nothing to link.</div>';
+        return;
+    }
+    document.getElementById('sheet-title').textContent =
+        (d.path || '/dev') + ' · service links';
+    body.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'cp';
+
+    const ch = d.channels || {};
+    wrap.innerHTML =
+        '<div class="cp-hero">' +
+          '<div class="cp-stat"><div class="cp-num">' + d.services.length +
+            '</div><div class="cp-lab">services</div></div>' +
+          '<div class="cp-stat"><div class="cp-num ' +
+            (d.shared_db ? 'bad' : 'good') + '">' + d.shared_db +
+            '</div><div class="cp-lab">share a database' +
+            (d.shared_db ? '' : ' — each owns its own') + '</div></div>' +
+          '<div class="cp-stat"><div class="cp-num">' + (ch.http || 0) +
+            '</div><div class="cp-lab">HTTP links, the loose kind</div></div>' +
+        '</div>';
+
+    let html = '';
+    // Who owns which database — inferred from the env var name.
+    if (Object.keys(d.owns || {}).length) {
+        html += '<div class="cp-h">Data ownership</div>' +
+                '<div class="cp-note">One owner per store is the goal. A service ' +
+                'reading another service&rsquo;s DB URL is the coupling to watch.</div>';
+        Object.keys(d.owns).sort().forEach(k => {
+            html += '<div class="cp-b"><span class="cp-edge">' + esc(k) +
+                    '</span><span class="cp-count">owned by ' +
+                    esc(d.owns[k]) + '</span></div>';
+        });
+    }
+
+    html += '<div class="cp-h">Links, worst coupling first</div>';
+    (d.links || []).forEach(l => {
+        const meta = CH_META[l.channel] || {label: l.channel, cost: '', cls: ''};
+        html += '<div class="cp-b ' + meta.cls + '">' +
+                '<span class="cp-edge">' + esc(l.from) +
+                ' <span class="cp-arrow">→</span> ' + esc(l.to) + '</span>' +
+                '<span class="lk-ch">' + esc(meta.label) + '</span>' +
+                '<span class="cp-count">' + l.count + '</span></div>';
+        (l.evidence || []).forEach(ev => {
+            const file = ev.split(' ')[0];
+            html += '<div class="cp-bf" data-file="' + esc(file) + '">' +
+                    esc(ev) + '</div>';
+        });
+    });
+
+    // Two services that call each other cannot be booted or deployed in
+    // isolation. Fine over HTTP, worth knowing about.
+    const pairs = new Set((d.links || []).map(l => l.from + '>' + l.to));
+    const twoWay = (d.links || []).filter(l => pairs.has(l.to + '>' + l.from))
+        .map(l => [l.from, l.to].sort().join(' ⇄ '));
+    const uniq = [...new Set(twoWay)];
+    if (uniq.length) {
+        html += '<div class="cp-h">Call each other</div>' +
+                '<div class="cp-note">Over HTTP this is allowed, not fatal — but ' +
+                'neither side can start up or deploy strictly before the other.</div>';
+        uniq.forEach(p => {
+            html += '<div class="cp-b"><span class="cp-edge">' + esc(p) + '</span></div>';
+        });
+    }
+    wrap.innerHTML += html;
+    body.appendChild(wrap);
+    wrap.querySelectorAll('.cp-bf').forEach(el => {
+        el.onclick = () => showFile(el.dataset.file);
+    });
+}
+
+
+// --- Behavioural code analysis ---------------------------------------------
+// What the git history knows that the code does not. Tornhill's two
+// instruments, computed from one log read:
+//   hotspots          revisions x lines. Risk is the PRODUCT — a big file
+//                     nobody edits is fine, a small one edited weekly is not.
+//   temporal coupling files that change together in the same commit, which is
+//                     coupling no import graph can see.
+// Generated data is reported separately from source: a 78,000-line snapshot
+// out-scores every hand-written file and carries none of the risk.
+async function showBehavior() {
+    const repo = _diffRepo !== null ? _diffRepo : (_ws.folder || _railPath || '');
+    openSheet('Hotspots & coupling');
+    const body = document.getElementById('sheet-body');
+    body.textContent = 'Reading history…';
+    let d;
+    try {
+        d = await (await fetch('/api/git/behavior?path=' + encodeURIComponent(repo))).json();
+    } catch (e) { body.textContent = 'Could not read history'; return; }
+    if (!d || d.repo === null) { body.textContent = 'Not a git repo.'; return; }
+
+    document.getElementById('sheet-title').textContent =
+        (d.repo || '/dev') + ' · hotspots & coupling';
+    body.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'cp';
+
+    wrap.innerHTML =
+        '<div class="cp-hero">' +
+          '<div class="cp-stat"><div class="cp-num">' + d.commits +
+            '</div><div class="cp-lab">commits read</div></div>' +
+          '<div class="cp-stat"><div class="cp-num">' + d.files_touched +
+            '</div><div class="cp-lab">files touched in them</div></div>' +
+          '<div class="cp-stat"><div class="cp-num">' + (d.coupled || []).length +
+            '</div><div class="cp-lab">file pairs that move together</div></div>' +
+        '</div>';
+
+    let html = '';
+    const hs = d.hotspots || [];
+    if (hs.length) {
+        const max = Math.max(...hs.map(h => h.score));
+        html += '<div class="cp-h">Hotspots</div><div class="cp-note">' +
+                'Revisions × lines. Where the edits and the size overlap is ' +
+                'where bugs and cost concentrate — refactor here, not in the ' +
+                'biggest file.</div>';
+        hs.forEach(h => {
+            const w = Math.max(2, Math.round((h.score / max) * 100));
+            html += '<div class="hs" data-file="' + esc(d.repo ? d.repo + '/' + h.file : h.file) + '">' +
+                '<div class="hs-top"><span class="hs-file">' + esc(h.file) + '</span>' +
+                '<span class="hs-meta">' + h.revs + ' edits · ' + h.lines + ' lines</span></div>' +
+                '<div class="hs-bar"><span style="width:' + w + '%"></span></div></div>';
+        });
+    }
+    if ((d.data_hotspots || []).length) {
+        html += '<div class="cp-h">Generated files</div><div class="cp-note">' +
+                'Measured apart on purpose: these are machine-written, so size ' +
+                'and churn here are output, not risk.</div>';
+        d.data_hotspots.forEach(h => {
+            html += '<div class="cp-b"><span class="cp-edge">' + esc(h.file) +
+                    '</span><span class="cp-count">' + h.revs + ' × ' +
+                    h.lines + ' lines</span></div>';
+        });
+    }
+
+    const cp = d.coupled || [];
+    if (cp.length) {
+        html += '<div class="cp-h">Temporal coupling</div><div class="cp-note">' +
+                'Files that change in the same commit. Nothing in the code links ' +
+                'a .py to a .css — if they still move together, they are coupled ' +
+                'in fact. Read as: touch the first, and this often is how often ' +
+                'you must touch the second.</div>';
+        cp.forEach(c => {
+            const pct = Math.round(c.degree * 100);
+            html += '<div class="tc">' +
+                '<div class="tc-pct' + (pct >= 80 ? ' hot' : '') + '">' + pct + '%</div>' +
+                '<div class="tc-files"><div>' + esc(c.a) + '</div>' +
+                '<div class="tc-plus">+ ' + esc(c.b) + '</div></div>' +
+                '<div class="tc-n">' + c.together + '×</div></div>';
+        });
+    } else {
+        html += '<div class="cp-h">Temporal coupling</div><div class="cp-note">' +
+                'No pair changed together at least three times yet — this needs ' +
+                'history to work with.</div>';
+    }
+    wrap.innerHTML += html;
+    body.appendChild(wrap);
+    wrap.querySelectorAll('.hs').forEach(el => {
+        el.onclick = () => showFile(el.dataset.file);
+    });
+}
+
+
+// --- Keyboard access ------------------------------------------------------
+// This grew 27 clickable rows built as divs, which a mouse handles and a
+// keyboard cannot: a div is not focusable, so Tab skips it and Enter has
+// nothing to act on. Rather than edit every render path, one observer stamps
+// role="button" and tabindex="0" onto rows as they appear, and one delegated
+// handler turns Enter and Space into a click.
+//
+// An observer rather than per-render calls because these panes re-render
+// constantly now (live refresh, tab switches, folder changes), and a per-site
+// approach would always be one forgotten call away from an unreachable row.
+const CLICKABLE = ['rail-row', 'gfile', 'ol-row', 'arm-row', 'arm-head',
+                   'proj-cell', 'fv-cell', 'cp-bf', 'hs', 'gp-c', 'ar-row',
+                   'ar-open', 'gb-hist', 'gb-live', 'gb-init', 'git-row',
+                   'fv-num', 'gp-back', 'rec-row'];
+
+function armRow(el) {
+    if (!el.classList || el.dataset.armed) return;
+    for (const c of CLICKABLE) {
+        if (el.classList.contains(c)) {
+            el.dataset.armed = '1';
+            el.setAttribute('role', 'button');
+            el.setAttribute('tabindex', '0');
+            return;
+        }
+    }
+}
+
+(function () {
+    const scan = (node) => {
+        if (node.nodeType !== 1) return;
+        armRow(node);
+        if (node.querySelectorAll) node.querySelectorAll('*').forEach(armRow);
+    };
+    new MutationObserver(muts => {
+        muts.forEach(m => m.addedNodes.forEach(scan));
+    }).observe(document.body, {childList: true, subtree: true});
+    document.querySelectorAll('*').forEach(armRow);
+
+    // Enter and Space activate, exactly as they would on a real button.
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const el = document.activeElement;
+        if (!el || !el.dataset || !el.dataset.armed) return;
+        // Not while typing — the type-bar owns Enter.
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return;
+        e.preventDefault();
+        el.click();
+    });
+})();
+
+// --- Live pane -------------------------------------------------------------
+// The pane stops being a snapshot. An agent saves a file; a couple of seconds
+// later the viewer is showing the new bytes, at the same scroll position.
+//
+// What this does NOT do is reload the page. A reload would discard scroll
+// position, which diff sections were expanded, and all seven warm terminal
+// iframes — the most expensive things on screen. Instead a fingerprint poll
+// decides which ONE of three things to re-fetch:
+//
+//   the open file changed      -> re-render the viewer, restore scrollTop
+//   the repo's status changed  -> refresh Changes (keeping expansions) and
+//                                 the git strip
+//   nothing changed            -> do nothing whatsoever, which is the common
+//                                 case and must stay free
+//
+// Paused while the tab is hidden: six off-screen workspaces polling git is
+// waste, and a hidden tab cannot be read anyway.
+let _live = {on: true, status: null, fileMtime: null, file: null, busy: false};
+
+function liveTarget() {
+    // What the pane is showing right now, if it is a file.
+    const t = document.getElementById('sheet-title');
+    if (!t) return null;
+    const first = t.textContent.split(' ')[0];
+    return /\.[a-z0-9]{1,6}$/i.test(first) ? first : null;
+}
+
+async function liveTick() {
+    if (!_live.on || !DOCKED() || document.hidden || _live.busy) return;
+    const folder = _ws.folder || _railPath || '';
+    const file = liveTarget();
+    _live.busy = true;
+    let d;
+    try {
+        const q = '/api/watch?path=' + encodeURIComponent(folder) +
+                  (file ? '&file=' + encodeURIComponent(file) : '');
+        d = await (await fetch(q)).json();
+    } catch (e) { _live.busy = false; return; }
+    _live.busy = false;
+
+    const firstRun = _live.status === null && _live.fileMtime === null;
+
+    // 1. The open file moved under us.
+    const mt = d.file ? d.file.mtime : null;
+    if (file && mt && _live.file === file && _live.fileMtime &&
+        mt !== _live.fileMtime && !firstRun) {
+        const body = document.getElementById('sheet-body');
+        const keep = body ? body.scrollTop : 0;
+        await showFile(file);
+        if (body) body.scrollTop = keep;   // stay where you were reading
+        setStatus('↻ ' + file.split('/').pop());
+    }
+    _live.file = file;
+    _live.fileMtime = mt;
+
+    // 2. The working tree moved: new edits, a new commit, a stage, a revert.
+    if (d.status !== null && _live.status !== null && d.status !== _live.status) {
+        loadGitBar();
+        // Only rebuild Changes if that is what you are looking at — rebuilding
+        // a view you cannot see is just churn.
+        const t = document.getElementById('sheet-title');
+        const inChanges = t && /\[.*\]\s+·/.test(t.textContent);
+        if (inChanges) {
+            const open = [...document.querySelectorAll('.gfile.open')]
+                .map(el => el.querySelector('.gname').textContent);
+            await showGit();
+            // Re-expand what was expanded, so a refresh never collapses your
+            // place in the review.
+            document.querySelectorAll('.gfile').forEach(el => {
+                const name = el.querySelector('.gname').textContent;
+                if (open.indexOf(name) !== -1) el.click();
+            });
+        }
+    }
+    if (d.status !== null) _live.status = d.status;
+}
+
+setInterval(liveTick, 2500);
+// Catch up immediately when you come back to the tab rather than waiting out
+// the interval.
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) liveTick();
+});
 
 // --- Git strip ------------------------------------------------------------
 // "Where are we in git" as one always-visible line, rather than something you
@@ -1774,10 +2574,158 @@ async function loadGitBar() {
         html += '<div class="gb-push">' + d.ahead + ' commit' +
                 (d.ahead > 1 ? 's' : '') + ' to push</div>';
     }
+    // Explicit way in. The branch name is clickable too, but nothing about it
+    // says so — a labelled row does.
+    html += '<div class="gb-hist">history &amp; branches \u203a</div>';
+    html += '<div class="gb-hist" id="gb-beh">hotspots &amp; coupling \u203a</div>';
+    html += '<div class="gb-live' + (_live.on ? ' on' : '') + '" id="gb-live">' +
+            (_live.on ? '\u25cf live' : '\u25cb paused') + '</div>';
     if (d.github) html += '<div class="gb-gh" id="gb-gh">GitHub \u2026</div>';
     bar.innerHTML = html;
+    // The branch line is the way into the full panel — history, branches, and
+    // the plain-English state of the repo.
+    const hist = bar.querySelector('.gb-hist');
+    if (hist) hist.onclick = (e) => { e.stopPropagation(); showGitPanel(); };
+    const beh = bar.querySelector('#gb-beh');
+    if (beh) beh.onclick = (e) => { e.stopPropagation(); showBehavior(); };
+    const lv = bar.querySelector('#gb-live');
+    if (lv) lv.onclick = (e) => {
+        e.stopPropagation();
+        _live.on = !_live.on;
+        setStatus(_live.on ? 'Live pane on' : 'Live pane paused');
+        loadGitBar();
+    };
+    const br = bar.querySelector('.gb-branch');
+    if (br) {
+        br.style.cursor = 'pointer';
+        br.title = 'Open the git panel';
+        br.onclick = (e) => { e.stopPropagation(); showGitPanel(); };
+    }
     if (d.github) loadGitHub(d.repo);
+    loadGitChart(d.repo);
     return d;
+}
+
+
+// --- The Git panel ---------------------------------------------------------
+// A full middle-pane view of the repo, built to be LEARNED from as much as
+// read. Three things in order: what state you are in (in sentences, not
+// symbols), the branches, then the history — and every commit opens its own
+// diff. Patrick's ask: "I want to get better with time to GitHub and what
+// things mean", so the wording does the teaching. No jargon without a gloss.
+async function showGitPanel() {
+    const repo = _diffRepo !== null ? _diffRepo : (_ws.folder || _railPath || '');
+    openSheet('Git');
+    const body = document.getElementById('sheet-body');
+    body.textContent = 'Loading...';
+
+    let sum = null, log = null, gh = null;
+    try {
+        [sum, log] = await Promise.all([
+            fetch('/api/git/summary?path=' + encodeURIComponent(repo)).then(r => r.json()),
+            fetch('/api/git/log?path=' + encodeURIComponent(repo) + '&limit=30').then(r => r.json()),
+        ]);
+    } catch (e) { body.textContent = 'Git unavailable'; return; }
+    if (!log || log.repo === null) { body.textContent = 'Not a git repo.'; return; }
+
+    document.getElementById('sheet-title').textContent =
+        (log.repo || '/dev') + '  ·  git';
+    body.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'gp';
+
+    // 1. State, in plain English. This is the part that teaches: each line says
+    //    what is true and where it is true, so "clean" can never read as
+    //    "shipped".
+    const lines = [];
+    lines.push('You are on branch <b>' + esc(log.branch) + '</b>' +
+               (log.upstream ? ', tracking <b>' + esc(log.upstream) + '</b>' :
+                ' <span class="gp-warn">(no remote branch — nothing is backed up)</span>') + '.');
+    if (sum && sum.dirty) {
+        const b = [];
+        if (sum.staged) b.push(sum.staged + ' staged');
+        if (sum.unstaged) b.push(sum.unstaged + ' changed but not staged');
+        if (sum.untracked) b.push(sum.untracked + ' never added to git');
+        lines.push('Uncommitted work here: ' + b.join(', ') +
+                   '. None of that exists anywhere but this disk.');
+    } else {
+        lines.push('Nothing uncommitted — every file matches the last commit.');
+    }
+    if (sum && sum.ahead) {
+        lines.push('<span class="gp-warn">' + sum.ahead + ' commit' +
+                   (sum.ahead > 1 ? 's' : '') + ' committed here but not pushed.</span> ' +
+                   'They are safe from edits, not safe from a dead disk.');
+    } else if (sum && sum.behind) {
+        lines.push('<span class="gp-warn">' + sum.behind +
+                   ' commit(s) on GitHub that you do not have.</span> Pull before committing.');
+    } else if (log.upstream) {
+        lines.push('GitHub has everything this machine has.');
+    }
+    wrap.innerHTML = '<div class="gp-state">' + lines.map(l => '<p>' + l + '</p>').join('') + '</div>';
+
+    // 2. Branches, verbatim from `git branch -vv` — the tracking column is the
+    //    thing worth getting used to reading.
+    if (log.branches && log.branches.length) {
+        const bs = document.createElement('details');
+        bs.className = 'gp-sec';
+        bs.innerHTML = '<summary>Branches (' + log.branches.length + ')</summary>' +
+            '<div class="gp-pre">' + log.branches.map(esc).join('\n') + '</div>';
+        wrap.appendChild(bs);
+    }
+
+    // 3. History. Each row is a commit; click it for that commit's diff.
+    const h = document.createElement('div');
+    h.className = 'gp-sec-open';
+    h.innerHTML = '<div class="gp-h">History — newest first</div>';
+    const list = document.createElement('div');
+    list.className = 'gp-log';
+    log.commits.forEach(c => {
+        const row = document.createElement('div');
+        row.className = 'gp-c' + (c.unpushed ? ' unpushed' : '');
+        const refs = c.refs
+            ? '<span class="gp-refs">' + esc(c.refs) + '</span>' : '';
+        row.innerHTML =
+            '<span class="gp-sha">' + esc(c.sha) + '</span>' +
+            '<span class="gp-subj">' + esc(c.subject) + refs + '</span>' +
+            '<span class="gp-when">' + esc(c.when) + '</span>' +
+            (c.unpushed ? '<span class="gp-local">local only</span>' : '');
+        row.onclick = () => showCommit(repo, c.sha);
+        list.appendChild(row);
+    });
+    h.appendChild(list);
+    wrap.appendChild(h);
+    body.appendChild(wrap);
+}
+
+// One commit, with its message and its full diff in the same accordion styling
+// the Changes view uses — so reading history looks like reading the present.
+async function showCommit(repo, sha) {
+    openSheet(sha);
+    const body = document.getElementById('sheet-body');
+    body.textContent = 'Loading...';
+    let d;
+    try {
+        d = await (await fetch('/api/git/show?sha=' + encodeURIComponent(sha) +
+                               '&path=' + encodeURIComponent(repo))).json();
+    } catch (e) { body.textContent = 'Could not load commit'; return; }
+    if (d.error) { body.textContent = d.error; return; }
+
+    document.getElementById('sheet-title').textContent = sha + ' · ' + d.subject;
+    body.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'gp-commit';
+    head.innerHTML =
+        '<div class="gp-commit-subj">' + esc(d.subject) + '</div>' +
+        '<div class="gp-when">' + esc(d.author) + ' · ' + esc(d.when) + '</div>' +
+        (d.body.trim() ? '<div class="gp-commit-body">' + esc(d.body.trim()) + '</div>' : '') +
+        (d.stat ? '<div class="gp-pre">' + esc(d.stat) + '</div>' : '') +
+        '<div class="gp-back">← back to history</div>';
+    head.querySelector('.gp-back').onclick = () => showGitPanel();
+    body.appendChild(head);
+    const pane = document.createElement('div');
+    pane.className = 'gbody shown';
+    renderHunks(d.diff || '', pane);
+    body.appendChild(pane);
 }
 
 // The GitHub half: open PRs and the latest CI run, via the gh CLI (already
@@ -1929,6 +2877,49 @@ function makeSplitter(el, which) {
     });
 }
 
+// Vertical dividers inside the left column. Same rule as the horizontal
+// ones — the size lands on RELEASE — except nothing here touches the terminal
+// width, so there is no xterm reflow to avoid and the guide can be skipped.
+// Files is flex:1, so giving height to Outline or Git takes it from Files.
+function makeVSplit(el, sectionId, key, min, max) {
+    if (!el) return;
+    const sec = document.getElementById(sectionId);
+    let dragging = false, startY = 0, startH = 0;
+
+    el.addEventListener('mousedown', (e) => {
+        if (!DOCKED()) return;
+        dragging = true;
+        startY = e.clientY;
+        startH = sec.getBoundingClientRect().height;
+        document.body.classList.add('vsplitting');
+        e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        // Dragging UP grows the section below, so the delta is inverted.
+        const h = Math.max(min, Math.min(max, startH + (startY - e.clientY)));
+        sec.style.height = h + 'px';
+    });
+    window.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        document.body.classList.remove('vsplitting');
+        try { localStorage.setItem(key, parseInt(sec.style.height, 10)); } catch (e) {}
+    });
+    el.addEventListener('dblclick', () => {
+        sec.style.height = '';
+        try { localStorage.removeItem(key); } catch (e) {}
+    });
+    try {
+        const px = parseInt(localStorage.getItem(key), 10);
+        if (px) sec.style.height = px + 'px';
+    } catch (e) {}
+}
+
+makeVSplit(document.getElementById('vsplit-outline'), 'sec-outline', 'spark.outlineH', 60, 600);
+makeVSplit(document.getElementById('vsplit-git'), 'sec-git', 'spark.gitH', 70, 600);
+makeVSplit(document.getElementById('vsplit-arch'), 'sec-arch', 'spark.archH', 60, 500);
+
 makeSplitter(document.getElementById('splitter-rail'), 'rail');
 makeSplitter(document.getElementById('splitter'), 'mid');
 
@@ -1944,14 +2935,43 @@ makeSplitter(document.getElementById('splitter'), 'mid');
 // most of /dev is not tracked. Rather than make "not a git repo" the default
 // view in camino and vigor, those fall back to the folder's own best view —
 // charts for a chart folder, the file list otherwise.
+// The default view, by whether the folder is a git repo.
+//
+//   repo     -> the DIFF, always. Patrick's rule, unconditional.
+//   no repo  -> the newest FILE, opened. 107 of 115 /dev folders have no repo,
+//               and a pane showing "not a git repo" is a wasted pane. The
+//               document-folder equivalent of "what changed here" is the thing
+//               that changed most recently, so open it and show it.
+//
+// The pane never collapses and the terminal never changes width either way —
+// a folder switch that reflowed the terminal would rewrap whatever Claude is
+// printing mid-sentence.
+const VIEWABLE = /\.(py|js|mjs|ts|tsx|jsx|html|css|json|jsonl|md|txt|csv|log|sh|bat|ps1|sql|yml|yaml|toml|ini|cfg|pdf|png|jpe?g|gif|webp|svg)$/i;
+
 async function paneDefault() {
     if (!DOCKED()) return;
     const git = await loadGitBar();
     if (git && (git.repo || git.repo === '')) return showGit();
-    if (_railKind === 'charts') return showCharts();
+
+    // No repo: open the most recently touched file worth looking at.
+    const q = (_railPath === null || _railPath === undefined)
+        ? '?session=' + encodeURIComponent(ACTIVE_SESSION)
+        : '?path=' + encodeURIComponent(_railPath);
+    try {
+        const d = await (await fetch('/api/recent' + q)).json();
+        const pick = (d.files || []).find(f => VIEWABLE.test(f.name));
+        if (pick) {
+            await showFile(pick.path);
+            // Say WHY this file is on screen — otherwise it looks arbitrary.
+            const t = document.getElementById('sheet-title');
+            if (t) t.textContent = t.textContent + '   (most recent)';
+            return;
+        }
+    } catch (e) { /* fall through to the empty state */ }
+
     openSheet('/dev/' + (_railPath || ''));
     document.getElementById('sheet-body').textContent =
-        'No git repo here — click a file in the rail to read it.';
+        'Nothing readable in this folder yet.';
 }
 
 // Docked means visible at load, which means it has to be POPULATED at load —

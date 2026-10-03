@@ -1426,10 +1426,16 @@ body.rail-open #file-rail { display: flex; }
    the git section can actually be smaller... that's really what I need to
    learn." So ARCHITECTURE is the greedy one now and Git is sized to exactly
    what it shows: a chart, a state line, a commit, a link. */
-#sec-files { flex: 0 0 auto; height: 240px; min-height: 70px; }
-#sec-outline { flex: 0 0 auto; height: 150px; }
-#sec-git { flex: 0 0 auto; height: 148px; min-height: 60px; }
-#sec-arch { flex: 1 1 auto; min-height: 120px; }
+/* 2026-10-02, fourth pass: Files is the greedy section again — Patrick wants
+   roughly two thirds of the column height for it. Being flex:1 rather than a
+   fixed px height means it scales with the window and absorbs the Outline
+   section whenever that is hidden (non-code files), instead of leaving a gap.
+   The three below it are sized to their content; all four still drag, and the
+   dragged heights persist. */
+#sec-files { flex: 1 1 auto; min-height: 50vh; }
+#sec-outline { flex: 0 0 auto; height: 120px; }
+#sec-git { flex: 0 0 auto; height: 136px; min-height: 60px; }
+#sec-arch { flex: 0 0 auto; height: 150px; min-height: 80px; }
 #arch-mini { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 4px 0; }
 #rail-list, #outline-list { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
 
@@ -1796,3 +1802,24 @@ body.vsplitting { cursor: row-resize; user-select: none; }
 /* Pointer cursor is applied per-row already; this catches anything armed that
    was styled without one. */
 [data-armed] { cursor: pointer; }
+
+/* ── PDF at full height ────────────────────────────────────────────────────
+   The pane normally scrolls its content. A PDF does not want that: the
+   embedded viewer pages itself, so an outer scroller just clips it (it was
+   stopping at 70vh). In pdf-full the pane becomes a frame — no padding, no
+   scrolling — and the iframe fills it. */
+#sheet-body.pdf-full {
+    display: flex;
+    overflow: hidden;
+    padding: 0;
+}
+#sheet-body.pdf-full .fv-pdf,
+#sheet-body.pdf-full > .fv-pdf {
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background: #fff;
+}

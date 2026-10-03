@@ -25,7 +25,7 @@
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=9.3">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=9.5">
     <!-- UI colors from theme.json (overrides style.css :root). Edit theme.json,
          restart the Spark app, and refresh to recolor the chrome. -->
     <style>
@@ -1185,6 +1185,9 @@ const DOCKED = () => window.matchMedia('(min-width: 1100px)').matches;
 // app.py. Reviewing what Claude just changed is the thing you cannot do from a
 // phone today, which is why this exists.
 function openSheet(title) {
+    // Drop the PDF frame mode — every other view is a scrolling document.
+    const sb = document.getElementById('sheet-body');
+    if (sb) sb.classList.remove('pdf-full');
     document.getElementById('sheet-title').textContent = title;
     document.getElementById('sheet-body').textContent = 'Loading...';
     document.body.classList.add('sheet-open');
@@ -1593,6 +1596,11 @@ async function showFile(relPath) {
         openSheet(relPath);
         const b = document.getElementById('sheet-body');
         b.innerHTML = '';
+        // A PDF was being cut off at 70vh inside a scrolling pane — two
+        // scrollbars fighting, and the document clipped. pdf-full turns the
+        // pane into a frame: no padding, no scrolling of its own, and the
+        // embedded viewer takes the whole height and does its own paging.
+        b.classList.add('pdf-full');
         const f = document.createElement('iframe');
         f.className = 'fv-pdf';
         f.src = '/api/file/raw?path=' + encodeURIComponent(relPath);
@@ -2916,6 +2924,9 @@ function makeVSplit(el, sectionId, key, min, max) {
     } catch (e) {}
 }
 
+// Dragging a divider sets the height of the section BELOW it, and Files
+// (flex:1) absorbs the difference — so these three are the only ones with a
+// stored height.
 makeVSplit(document.getElementById('vsplit-outline'), 'sec-outline', 'spark.outlineH', 60, 600);
 makeVSplit(document.getElementById('vsplit-git'), 'sec-git', 'spark.gitH', 70, 600);
 makeVSplit(document.getElementById('vsplit-arch'), 'sec-arch', 'spark.archH', 60, 500);

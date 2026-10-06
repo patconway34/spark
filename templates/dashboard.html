@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spark Dashboard</title>
+<style>
+/* Second screen. Read from ten feet, touched never.
+   Dark on purpose: this sits on a monitor in the corner of the eye, and a bright
+   panel in peripheral vision is tiring. Big type for the same reason. */
+:root{
+  --bg:#1a1a19; --panel:#232322; --line:#36352f;
+  --text:#f2e9d8; --dim:#a8a398; --accent:{{ theme_ui.accent }};
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+  height:100vh; display:flex; flex-direction:column; overflow:hidden;
+}
+header{
+  flex:0 0 auto; display:flex; align-items:center; gap:18px;
+  padding:14px 22px; border-bottom:2px solid var(--line); background:var(--panel);
+}
+#dot{width:20px;height:20px;border-radius:50%;flex:0 0 auto}
+#name{font-size:1.9rem;font-weight:700;letter-spacing:-.01em}
+#meta{margin-left:auto;text-align:right;font-size:1rem;color:var(--dim);line-height:1.5}
+#meta b{color:var(--text);font-weight:600}
+#tabs{display:flex;gap:7px;margin-left:6px}
+.tab{width:13px;height:13px;border-radius:50%;opacity:.26}
+.tab.on{opacity:1;transform:scale(1.35)}
+#screen{
+  flex:1; overflow:hidden; padding:16px 22px;
+  font-size:1.45rem; line-height:1.42; white-space:pre-wrap; word-break:break-word;
+}
+footer{
+  flex:0 0 auto;display:flex;gap:26px;align-items:center;
+  padding:10px 22px;border-top:2px solid var(--line);
+  background:var(--panel);font-size:1rem;color:var(--dim);
+}
+footer b{color:var(--text)}
+#stale{margin-left:auto;color:#b57614}
+</style>
+</head>
+<body>
+
+<header>
+  <div id="dot"></div>
+  <div id="name">—</div>
+  <div id="tabs"></div>
+  <div id="meta"></div>
+</header>
+
+<div id="screen">Connecting…</div>
+
+<footer>
+  <div id="git">—</div>
+  <div id="stale"></div>
+</footer>
+
+<script>
+// Polls one endpoint. No clicks, no state, no interaction — if it ever needs a
+// tap it has stopped being a second monitor.
+const POLL_MS = 1500;
+let misses = 0;
+
+async function tick() {
+  try {
+    const d = await (await fetch('/api/dashboard?lines=26', {cache:'no-store'})).json();
+    misses = 0;
+    document.getElementById('stale').textContent = '';
+
+    const s = d.session || {};
+    document.getElementById('dot').style.background = s.color || '#af3a03';
+    document.getElementById('name').textContent = s.name ? ('Terminal ' + s.name) : '—';
+    document.getElementById('meta').innerHTML =
+      '<b>' + (s.tmux || '') + '</b><br>' + (s.model || '');
+
+    // Which terminal of N, as dots — tells you where you are at a glance.
+    const tabs = document.getElementById('tabs');
+    tabs.innerHTML = '';
+    (d.sessions || []).forEach(x => {
+      const el = document.createElement('div');
+      el.className = 'tab' + (x.id === s.id ? ' on' : '');
+      el.style.background = x.color || '#888';
+      tabs.appendChild(el);
+    });
+
+    document.getElementById('screen').textContent = d.screen || '(empty)';
+
+    const g = d.git || {};
+    document.getElementById('git').innerHTML = (g.repo === null || g.repo === undefined)
+      ? 'not a git repo'
+      : '<b>' + (g.repo || '/dev') + '</b> &nbsp; ' + (g.branch || '?') +
+        ' &nbsp; <b>' + g.changed + '</b> changed';
+  } catch (e) {
+    // Don't blank the screen on one bad poll — the last good frame is still
+    // more useful than an error, so just flag that it has gone stale.
+    if (++misses > 3) document.getElementById('stale').textContent = 'disconnected';
+  }
+}
+tick();
+setInterval(tick, POLL_MS);
+</script>
+</body>
+</html>

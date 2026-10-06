@@ -2532,6 +2532,59 @@ def api_git_diff():
     return jsonify({"file": rel, "diff": out[:200000]})
 
 
+# --- Dashboard (second screen) ---------------------------------------------
+# A read-only companion view for a monitor across the room while Patrick walks
+# around with the mic and the clicker. It follows the ACTIVE terminal on its own
+# because the active session lives on the SERVER (_active_session_id), not in
+# the phone's browser — so clicking to the next terminal moves this too, with no
+# pairing or syncing of any kind.
+#
+# Design rule: nothing here may require a click. If you have to walk over and
+# touch it, it has failed at being a second monitor.
+@app.route("/dashboard")
+def dashboard_page():
+    resp = make_response(render_template("dashboard.html",
+                                         theme_ui=_theme_ui_for_template()))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
+
+
+@app.route("/api/dashboard")
+def api_dashboard():
+    """Everything the second screen shows, in one poll."""
+    s = get_session()
+    lines = int(request.args.get("lines", 24))
+    lines = max(5, min(lines, 80))
+    text = _capture_scrollback(lines=lines, session_id=s["id"])
+
+    # Git summary for whatever project that terminal is sitting in.
+    git = {"repo": None, "changed": 0, "branch": None}
+    try:
+        cwd = _pane_cwd_rel(s["tmux"])
+        target = _files_safe(cwd) or FILES_ROOT.resolve()
+        repo = _git_root(target if target.is_dir() else target.parent)
+        if repo is not None:
+            rc, out = _git(repo, "status", "--porcelain=v1")
+            rc2, br = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+            root = FILES_ROOT.resolve()
+            git = {
+                "repo": "" if repo == root else str(repo.relative_to(root)).replace("\\", "/"),
+                "changed": len([l for l in out.splitlines() if l.strip()]),
+                "branch": (br or "").strip() or None,
+            }
+    except Exception as e:
+        logging.warning(f"DASHBOARD git: {e}")
+
+    return jsonify({
+        "session": {"id": s["id"], "name": s["name"], "color": s.get("color"),
+                    "tmux": s["tmux"], "model": s.get("model")},
+        "screen": text,
+        "git": git,
+        "sessions": [{"id": x["id"], "name": x["name"], "color": x.get("color")}
+                     for x in SESSIONS],
+    })
+
+
 @app.route("/api/key", methods=["POST"])
 def key():
     data = request.get_json()

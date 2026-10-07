@@ -25,7 +25,7 @@
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=12.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=12.2">
     <!-- UI colors from theme.json (overrides style.css :root). Edit theme.json,
          restart the Spark app, and refresh to recolor the chrome. -->
     <style>
@@ -67,7 +67,7 @@
      whole window. The controller already covers mic, enter, escape, tab
      switching, page up/down, clear, big text and listen, so in full mode the
      only thing you give up is typing, and typing is the way back out. -->
-<div id="full-toggle" onclick="toggleZen()" title="Full screen terminal">&#9663;</div>
+<button id="full-toggle" type="button" onclick="toggleZen()" title="Full screen terminal">&#9663;</button>
 
 <div id="controls">
     <!-- Hamburger menu — grouped, 36px targets. All styling is in style.css
@@ -932,164 +932,6 @@ const esc = (t) => String(t).replace(/&/g, '&amp;')
 function toggleHamburger() {
     const panel = document.getElementById('hamburger-panel');
     panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
-}
-
-// --- Keyboard access ------------------------------------------------------
-// This grew 27 clickable rows built as divs, which a mouse handles and a
-// keyboard cannot: a div is not focusable, so Tab skips it and Enter has
-// nothing to act on. Rather than edit every render path, one observer stamps
-// role="button" and tabindex="0" onto rows as they appear, and one delegated
-// handler turns Enter and Space into a click.
-//
-// An observer rather than per-render calls because these panes re-render
-// constantly now (live refresh, tab switches, folder changes), and a per-site
-// approach would always be one forgotten call away from an unreachable row.
-const CLICKABLE = ['tr', 'rail-head', 'gfile', 'ol-row', 'arm-row', 'arm-head',
-                   'proj-cell', 'fv-cell', 'cp-bf', 'hs', 'gp-c', 'ar-row',
-                   'ar-open', 'gb-hist', 'gb-live', 'gb-init', 'git-row',
-                   'fv-num', 'gp-back', 'rec-row'];
-
-function armRow(el) {
-    if (!el.classList || el.dataset.armed) return;
-    for (const c of CLICKABLE) {
-        if (el.classList.contains(c)) {
-            el.dataset.armed = '1';
-            el.setAttribute('role', 'button');
-            el.setAttribute('tabindex', '0');
-            return;
-        }
-    }
-}
-
-(function () {
-    const scan = (node) => {
-        if (node.nodeType !== 1) return;
-        armRow(node);
-        if (node.querySelectorAll) node.querySelectorAll('*').forEach(armRow);
-    };
-    new MutationObserver(muts => {
-        muts.forEach(m => m.addedNodes.forEach(scan));
-    }).observe(document.body, {childList: true, subtree: true});
-    document.querySelectorAll('*').forEach(armRow);
-
-    // Enter and Space activate, exactly as they would on a real button.
-    document.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        const el = document.activeElement;
-        if (!el || !el.dataset || !el.dataset.armed) return;
-        // Not while typing — the type-bar owns Enter.
-        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return;
-        e.preventDefault();
-        el.click();
-    });
-})();
-
-// --- Session themes ---
-function applyTheme(id) {
-    document.body.className = document.body.className.replace(/theme-\w+/g, '').trim();
-    document.body.classList.add('theme-' + id);
-    // Drive --theme from the active session's own color so the ESC/MIC/ENTER
-    // buttons and the controls border match the active tab + terminal exactly —
-    // for any tab count, independent of the hardcoded CSS theme-N fallbacks.
-    const s = (_sessions || []).find(x => x.id === id);
-    if (s && s.color) {
-        const c = s.color.replace('#', '');
-        const r = parseInt(c.substr(0, 2), 16),
-              g = parseInt(c.substr(2, 2), 16),
-              b = parseInt(c.substr(4, 2), 16);
-        const S = document.body.style;
-        S.setProperty('--theme', s.color);
-        S.setProperty('--theme-dim', `rgba(${r},${g},${b},0.12)`);
-        // Contrast label color for solid-themed buttons (MIC) so bright hues get
-        // dark text instead of unreadable white.
-        S.setProperty('--theme-text',
-            (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#1a1a1a' : '#ffffff');
-        // Chrome (panel, surfaces) stays neutral grey from theme.json 'ui' for a
-        // standard look — only the buttons and active tab take the terminal color.
-    }
-}
-
-// --- Tab navigation helpers ---
-// ↑ walks back through terminals in most-recently-used order. Presses within
-// NAV_CHAIN_MS chain deeper (1 press = previous, 2 = two back, ...); when the
-// window lapses the chain commits as ONE move, so terminals flashed through
-// mid-chain don't pollute the recency order. Taps/swipes break any open chain.
-const NAV_CHAIN_MS = 3000;
-let _mru = [ACTIVE_SESSION];   // session ids, most recent first (current = [0])
-let _navChain = null;          // {list, idx} while an ↑-chain is open
-let _navChainTimer = null;
-
-function _mruTouch(id) {
-    const i = _mru.indexOf(id);
-    if (i >= 0) _mru.splice(i, 1);
-    _mru.unshift(id);
-}
-
-
-function switchSessionByOffset(offset) {
-    const ids = _sessions.map(s => s.id);
-    const idx = ids.indexOf(ACTIVE_SESSION);
-    if (idx < 0) return;
-    const next = (idx + offset + ids.length) % ids.length;
-    switchSession(ids[next]);
-}
-
-// --- Session/tab management ---
-// Optimistic + instant switch: flip the UI synchronously so a loaded terminal
-// appears with zero delay (no waiting on the network). The backend's active-
-// session sync is fire-and-forget — every keystroke/command already carries the
-// explicit session id (see sendKey/sendCommand), so routing stays correct even
-// before the backend catches up. Previously this AWAITED the POST before showing
-// the terminal, which added a full round-trip of latency to every switch.
-function switchSession(id, chained) {
-    if (id === ACTIVE_SESSION) return;
-    if (!chained) {   // direct switch (tap/swipe): breaks any ↑-chain, commits now
-        clearTimeout(_navChainTimer);
-        _navChain = null;
-        _mruTouch(id);
-    }
-    ACTIVE_SESSION = id;
-    document.querySelectorAll('.terminal-wrap').forEach(w => {
-        w.classList.toggle('term-hidden', w.id !== 'wrap-' + id);
-    });
-    // Lazy load: bring up the newly-active terminal, keep the recent ones loaded
-    // (MAX_LOADED) for instant switch-back, free the rest (mobile memory).
-    loadActiveTerminal();
-    unloadInactiveTerminals();
-    // Then warm the new tab's neighbours in the background, so the NEXT ±1
-    // switch is a visibility flip too. Debounced — a swipe run skips the
-    // terminals it passes straight through.
-    scheduleNeighbourWarm();
-    applyTheme(id);
-    renderTabs();
-    // Sync backend active session in the background; don't block the UI on it.
-    fetch('/api/session', {
-        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}),
-    }).catch(() => {});
-}
-
-
-// Rename a terminal. An empty name clears the custom label server-side, so a
-// tab can always go back to showing its number.
-async function renameSession(id, name) {
-    try {
-        await fetch('/api/session/rename', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({id, name}),
-        });
-        refreshSessions();
-    } catch (e) {}
-}
-
-// Re-read the session list and repaint the tabs.
-async function refreshSessions() {
-    try {
-        const res = await fetch('/api/sessions');
-        const data = await res.json();
-        _sessions = data.sessions;
-        renderTabs();
-        applyTheme(ACTIVE_SESSION);   // keep MIC/ESC/ENTER matched to the active tab
-    } catch (e) {}
 }
 
 // --- Zen (controller) mode ------------------------------------------------

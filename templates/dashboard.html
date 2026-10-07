@@ -53,8 +53,10 @@ footer b{color:var(--text)}
 
 <div id="screen">Connecting…</div>
 
+<!-- Footer carries one thing: whether this screen is still live. The git
+     readout that used to sit here is gone — nothing assigns a project to a
+     terminal any more, so it only ever said "not a git repo". -->
 <footer>
-  <div id="git">—</div>
   <div id="stale"></div>
 </footer>
 
@@ -88,11 +90,6 @@ async function tick() {
 
     document.getElementById('screen').textContent = d.screen || '(empty)';
 
-    const g = d.git || {};
-    document.getElementById('git').innerHTML = (g.repo === null || g.repo === undefined)
-      ? 'not a git repo'
-      : '<b>' + (g.repo || '/dev') + '</b> &nbsp; ' + (g.branch || '?') +
-        ' &nbsp; <b>' + g.changed + '</b> changed';
   } catch (e) {
     // Don't blank the screen on one bad poll — the last good frame is still
     // more useful than an error, so just flag that it has gone stale.

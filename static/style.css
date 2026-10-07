@@ -191,19 +191,6 @@ body.big-text .terminal-frame {
     flex-direction: column;
 }
 body.sheet-open #sheet { display: flex; }
-/* faded yellow */
-
-/* ── Changes accordion ─────────────────────────────────────────────────────
-   Every changed file is a collapsible header with its diff inline underneath.
-   Opens collapsed, so the first thing you see is the whole shape of the change
-   set — 15 filenames in one view — and you unfold only what you care about.
-   Several can be open at once; opening one never closes another. */
-.git-row {
-    display: flex;
-    gap: 6px;
-    align-items: baseline;
-    cursor: pointer;
-}
 .git-diff.open { display: block; }
 .git-row.open { background: var(--accent-dim); }
 /* Controls Section */
@@ -392,32 +379,6 @@ body.rail-collapsed #sheet { left: 0; }
        Found 2026-10-06. */
     #controls { position: relative; z-index: 60; }
 }
-/* ── Polish pass (2026-10-02) ──────────────────────────────────────────────
-   Rules of the house, so this stays smooth as it grows:
-
-   1. Animate ONLY transform and opacity. Those are composited — the browser
-      hands them to the GPU and never re-lays-out the page. Transitioning
-      width/height/top/left on a layout this size means a reflow per frame,
-      and a reflow here also re-columns the terminal iframe.
-   2. 120ms is the budget. Long enough to read as motion, short enough that it
-      never stands between a click and the content.
-   3. Big lists get content-visibility. A 3,600-line diff is ~14,000 DOM nodes;
-      without it the browser lays out every row before painting the first one.
-   4. Respect prefers-reduced-motion. */
-
-.rail-row, .gfile, .proj-cell, .fv-cell, #git-bar, .rail-ins, .gopen {
-    transition: background-color 120ms ease, color 120ms ease, opacity 120ms ease;
-}
-/* The press feedback is a transform, so it costs nothing. */
-.rail-row:active, .gfile:active, .proj-cell:active { transform: scale(0.995); }
-.fv-cell:active { transform: scale(0.98); }
-/* Keyboard reachability — this is a desktop app now, so focus has to be
-   visible. outline does not affect layout, unlike a border. */
-.rail-row:focus-visible, .gfile:focus-visible, .proj-cell:focus-visible,
-.fv-cell:focus-visible, #git-bar:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-}
 /* Long lists: skip layout for rows that are off screen. contain-intrinsic-size
    gives the scrollbar a believable estimate so it does not jump around while
    you scroll. */
@@ -425,14 +386,10 @@ body.rail-collapsed #sheet { left: 0; }
     content-visibility: auto;
     contain-intrinsic-size: auto 1.45em;
 }
-/* The gallery is images, which are the expensive case — these also carry
-   loading="lazy" in the markup. */
-.fv-cell { content-visibility: auto; contain-intrinsic-size: auto 150px; }
 @media (prefers-reduced-motion: reduce) {
     .rail-row, .gfile, .proj-cell, .fv-cell, #git-bar, .gcaret, .rail-ins, .gopen {
         transition: none;
     }
-.rail-row:active, .gfile:active, .proj-cell:active, .fv-cell:active { transform: none; }
 }
 /* ── The chrome, made to shine ─────────────────────────────────────────────
    With the panes gone the control bar IS the interface, so it gets the
@@ -488,6 +445,11 @@ body.rail-collapsed #sheet { left: 0; }
    It has to stay visible — a mode with nothing to click is a trap for anyone
    without the controller in hand. Typing also exits, which covers the rest. */
 #full-toggle {
+    /* a <button>, so these resets matter */
+    -webkit-appearance: none;
+    appearance: none;
+    font-family: inherit;
+    padding: 0;
     position: fixed;
     top: 0;
     right: 0;

@@ -2573,11 +2573,17 @@ def api_dashboard():
     lines = max(5, min(lines, 80))
     text = _capture_scrollback(lines=lines, session_id=s["id"])
 
-    # Git summary for whatever project that terminal is sitting in.
+    # Git summary for the terminal's WORKSPACE, not its pane cwd.
+    #
+    # Found 2026-10-07: the dashboard's git panel was always blank. It asked
+    # the pane where it was, and every pane runs claude from /dev root — which
+    # is not a repo — so the panel reported nothing for every terminal. The
+    # workspace is the folder Patrick ASSIGNED to the tab, which is the thing
+    # he means by "what am I working on".
     git = {"repo": None, "changed": 0, "branch": None}
     try:
-        cwd = _pane_cwd_rel(s["tmux"])
-        target = _files_safe(cwd) or FILES_ROOT.resolve()
+        folder = _workspace(s["id"])["folder"] or _pane_cwd_rel(s["tmux"])
+        target = _files_safe(folder) or FILES_ROOT.resolve()
         repo = _git_root(target if target.is_dir() else target.parent)
         if repo is not None:
             rc, out = _git(repo, "status", "--porcelain=v1")
@@ -2591,11 +2597,43 @@ def api_dashboard():
     except Exception as e:
         logging.warning(f"DASHBOARD git: {e}")
 
+    # What has just been written in this workspace. The second screen's job is
+    # to answer "what is it doing" from ten feet away, and a list of files that
+    # changed in the last few minutes answers that better than scrollback does.
+    activity = []
+    try:
+        folder = _workspace(s["id"])["folder"]
+        base = _files_safe(folder) if folder else None
+        if base is not None and base.is_dir():
+            found = []
+            for f in list(base.glob("*"))[:400]:
+                if f.is_file() and not f.name.startswith("."):
+                    found.append(f)
+            for d in list(base.glob("*/"))[:30]:
+                if d.is_dir() and not d.name.startswith((".", "_")):
+                    for f in list(d.glob("*"))[:200]:
+                        if f.is_file() and not f.name.startswith("."):
+                            found.append(f)
+            now = time.time()
+            found.sort(key=lambda f: -f.stat().st_mtime)
+            root = FILES_ROOT.resolve()
+            for f in found[:8]:
+                age = now - f.stat().st_mtime
+                activity.append({
+                    "name": f.name,
+                    "path": str(f.relative_to(root)).replace("\\", "/"),
+                    "mins": int(age // 60),
+                })
+    except Exception as e:
+        logging.warning(f"DASHBOARD activity: {e}")
+
     return jsonify({
         "session": {"id": s["id"], "name": s["name"], "color": s.get("color"),
                     "tmux": s["tmux"], "model": s.get("model")},
         "screen": text,
         "git": git,
+        "workspace": _workspace(s["id"])["folder"],
+        "activity": activity,
         "sessions": [{"id": x["id"], "name": x["name"], "color": x.get("color")}
                      for x in SESSIONS],
     })

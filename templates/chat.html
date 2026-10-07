@@ -25,7 +25,7 @@
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=11.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=12.0">
     <!-- UI colors from theme.json (overrides style.css :root). Edit theme.json,
          restart the Spark app, and refresh to recolor the chrome. -->
     <style>
@@ -60,6 +60,14 @@
 <iframe id="term-{{ s.id }}" class="terminal-frame" data-local="{{ s.local_url }}" data-remote="{{ s.remote_url }}" data-bg="{{ s.bg }}"></iframe>
 </div>
 {% endfor %}
+
+<!-- Full-bleed toggle. Top-right, thin, always there: the ONLY pixel of
+     Spark's own UI that survives in full mode. Everything else — tabs, type
+     bar, the three big keys — is hidden and the terminal iframe takes the
+     whole window. The controller already covers mic, enter, escape, tab
+     switching, page up/down, clear, big text and listen, so in full mode the
+     only thing you give up is typing, and typing is the way back out. -->
+<div id="full-toggle" onclick="toggleZen()" title="Full screen terminal">&#9663;</div>
 
 <div id="controls">
     <!-- Hamburger menu — grouped, 36px targets. All styling is in style.css
@@ -1017,26 +1025,6 @@ function _mruTouch(id) {
     _mru.unshift(id);
 }
 
-function switchToLastSession() {
-    if (!_navChain) {
-        // Recency order first, never-visited terminals appended in tab order,
-        // current terminal pinned at [0] — ↑ can always reach everything.
-        const ids = _sessions.map(s => s.id);
-        const list = _mru.filter(id => ids.includes(id));
-        ids.forEach(id => { if (!list.includes(id)) list.push(id); });
-        const cur = list.indexOf(ACTIVE_SESSION);
-        if (cur > 0) { list.splice(cur, 1); list.unshift(ACTIVE_SESSION); }
-        if (list.length < 2) return;
-        _navChain = { list, idx: 0 };
-    }
-    _navChain.idx = (_navChain.idx + 1) % _navChain.list.length;
-    clearTimeout(_navChainTimer);
-    _navChainTimer = setTimeout(() => {
-        _navChain = null;
-        _mruTouch(ACTIVE_SESSION);   // commit where the chain landed as one move
-    }, NAV_CHAIN_MS);
-    switchSession(_navChain.list[_navChain.idx], true);
-}
 
 function switchSessionByOffset(offset) {
     const ids = _sessions.map(s => s.id);
@@ -1103,6 +1091,40 @@ async function refreshSessions() {
         applyTheme(ACTIVE_SESSION);   // keep MIC/ESC/ENTER matched to the active tab
     } catch (e) {}
 }
+
+// --- Zen (controller) mode ------------------------------------------------
+// The control bar exists for fingers. With the 8BitDo in hand almost all of it
+// is already bound — mic, enter, escape, tab switching, page up/down, clear
+// line, big text, listen, /new, refresh — so the buttons are 137px of screen
+// spent on things you are not pressing.
+//
+// Zen hides them and gives the height to the terminal, leaving a 20px strip
+// with the two facts the bar was actually conveying: which terminal (colour +
+// name) and what just happened (status).
+//
+// The corner button is the ONLY way to switch. Patrick's call, 2026-10-07:
+// no keyboard shortcut, no controller binding, no menu entry, and typing does
+// not break you out. One control, one meaning, nothing to trigger by accident
+// mid-sentence — which is the real risk when every spare key is already a
+// controller button and your hands are on a gamepad.
+//
+// That makes the button's visibility load-bearing: it is the single exit, so
+// it stays dark-on-cream at 80% opacity and never fades out.
+let _zen = false;
+
+function toggleZen(on) {
+    _zen = (on === undefined) ? !_zen : on;
+    document.body.classList.toggle('zen', _zen);
+    try { localStorage.setItem('spark.zen', _zen ? '1' : '0'); } catch (e) {}
+    const t = document.getElementById('full-toggle');
+    if (t) t.innerHTML = _zen ? '&#9661;' : '&#9663;';   // filled when full
+    setStatus(_zen ? 'Full screen' : 'Controls shown');
+    // The terminal just changed height; let xterm notice.
+    setTimeout(() => { const f = document.getElementById('term-' + ACTIVE_SESSION);
+                       if (f) f.contentWindow?.dispatchEvent(new Event('resize')); }, 60);
+}
+
+try { if (localStorage.getItem('spark.zen') === '1') toggleZen(true); } catch (e) {}
 
 // --- Tabs -----------------------------------------------------------------
 // One pill per terminal. A tab carries a NAME and nothing else now — no

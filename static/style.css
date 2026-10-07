@@ -27,6 +27,9 @@
        flat 80px in every state — right when folded (the nav bar really does eat
        it), pure waste when unfolded. The @media override below fixes that. */
     --safe-bottom: env(safe-area-inset-bottom, 80px);
+    /* The lip to clear in FULL mode, where there is no control bar in the way.
+       Browser tab on Android: ~30px of nav bar. See the note in the zen block. */
+    --full-bottom: env(safe-area-inset-bottom, 10px);
     --header-height: 1.6rem;
     --control-bg: rgba(235, 219, 178, 0.96);   /* gruvbox light1 */
 
@@ -34,7 +37,6 @@
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
 }
-
 /* ── Fold state: measured by width, not by asking Android ───────────────────
    MEASURED 2026-09-30: Fold 7 cover = 514px, inner panel = 936px, desktop
    browser = 1400px. Breakpoint sits at 720px — the midpoint of the two phone
@@ -50,17 +52,14 @@
         --safe-bottom: env(safe-area-inset-bottom, 16px);
     }
 }
-
 /* Spacer div at the end of #controls. Was a hard-coded inline height:60px, which
    stacked ON TOP of --safe-bottom — 140px of dead space when unfolded. Folded
    keeps the original 60px (it is genuinely needed there; see the comment in
    chat.html). Unfolded reclaims most of it. */
 #bottom-buffer { height: 60px; }
-
 @media (min-width: 720px) {
     #bottom-buffer { height: 8px; }
 }
-
 /* ── Installed app vs browser tab ───────────────────────────────────────────
    The generous bottom padding exists for ONE reason: Android's nav bar overlaps
    the bottom of a browser tab. The installed PWA runs display:fullscreen, where
@@ -76,24 +75,32 @@
 @media (display-mode: fullscreen), (display-mode: standalone) {
     :root {
         --safe-bottom: env(safe-area-inset-bottom, 6px);
+        /* Installed: no nav bar, so full mode really is the whole screen. */
+        --full-bottom: env(safe-area-inset-bottom, 0px);
     }
-    #bottom-buffer { height: 6px; }
+#bottom-buffer { height: 6px; }
 }
-
 * { box-sizing: border-box; margin: 0; padding: 0; }
-
 body {
     background-color: var(--bg);
     color: var(--text);
     font-family: var(--font-sans);
+    /* 100vh on Android Chrome is the LARGEST viewport — the height with the
+       URL bar collapsed — not the height you can currently see. So a 100vh
+       body is taller than the window whenever the URL bar is showing, and its
+       bottom falls behind the nav bar no matter what padding is added. That is
+       why subtracting pixels never fixed the cut-off bottom.
+       100dvh is the DYNAMIC viewport height: it tracks the visible area and
+       re-resolves as the URL bar shows and hides. The 100vh line stays first
+       as the fallback for anything that does not know dvh. */
     height: 100vh;
+    height: 100dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
     overscroll-behavior: contain;
     -webkit-font-smoothing: antialiased;
 }
-
 /* Terminal Container */
 .terminal-wrap {
     flex: 1;
@@ -102,7 +109,6 @@ body {
     width: 100vw;
     min-width: 100vw;
 }
-
 /* Hidden terminals stay full-size (just invisible) so their xterm client
    never reports a tiny viewport — display:none made tmux collapse to 1 col. */
 .terminal-wrap.term-hidden {
@@ -113,7 +119,6 @@ body {
     height: 100%;
     z-index: -1;
 }
-
 .terminal-frame {
     width: 100vw !important;
     min-width: 100vw !important;
@@ -122,7 +127,6 @@ body {
     background: var(--theme-bg, #f0f0f0);
     pointer-events: none;
 }
-
 /* Big text = a CSS scale on the terminal iframe. No restart, no ttyd involved —
    it applies the instant the class flips, which is why the button is instant.
    2026-10-01: eased 1.6 -> 1.35 -> 1.18. The base ttyd font went 15 -> 17 the
@@ -139,8 +143,6 @@ body.big-text .terminal-frame {
     transform: scale(1.18);
     transform-origin: top left;
 }
-
-
 /* ── Hamburger menu ───────────────────────────────────────────────────────
    Was 24 identical 28px buttons in one wrapped blob: nothing had priority and
    every target was small for a phone used on the move. Now grouped under labels
@@ -154,9 +156,7 @@ body.big-text .terminal-frame {
     overflow-y: auto;
     overscroll-behavior: contain;
 }
-
 .ham-group { display: flex; flex-direction: column; gap: 0.25rem; }
-
 .ham-label {
     font-size: 0.52rem;
     font-weight: 700;
@@ -167,9 +167,7 @@ body.big-text .terminal-frame {
     border-bottom: 1px solid var(--border);
     padding-bottom: 2px;
 }
-
 .ham-row { display: flex; gap: 0.3rem; }
-
 /* Every button in the menu: one rule instead of 24 inline styles. */
 #hamburger-panel .key-btn {
     height: 36px;
@@ -180,7 +178,6 @@ body.big-text .terminal-frame {
 }
 #hamburger-panel .ham-yes,
 #hamburger-panel .ham-no { font-weight: 700; font-size: 0.72rem; }
-
 /* ── Diff / preview sheet ──────────────────────────────────────────────────
    A dismissible full-screen sheet, NOT a column. On a 936px fold there is no
    room for a permanent second panel, and reviewing a diff is a thing you do and
@@ -194,39 +191,7 @@ body.big-text .terminal-frame {
     flex-direction: column;
 }
 body.sheet-open #sheet { display: flex; }
-
-#sheet-bar {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border-strong);
-}
-#sheet-title {
-    flex: 1;
-    min-width: 0;
-    font-family: var(--font-mono);
-    font-size: 0.68rem;
-    color: var(--text-dim);
-    word-break: break-all;
-}
-#sheet-body {
-    flex: 1;
-    overflow: auto;
-    overscroll-behavior: contain;
-    padding: 8px 10px calc(30vh + var(--safe-bottom));
-    font-family: var(--font-mono);
-    font-size: 0.62rem;
-    line-height: 1.35;
-    white-space: pre;         /* diffs are column-aligned; never wrap them */
-}
-/* Diff colouring, kept close to the gruvbox palette already in use. */
-.d-add { color: #427b58; }                    /* faded aqua  */
-.d-del { color: #9d0006; }                    /* faded red   */
-.d-hdr { color: var(--text-muted); font-weight: 600; }
-.d-hunk { color: #b57614; font-weight: 600; } /* faded yellow */
+/* faded yellow */
 
 /* ── Changes accordion ─────────────────────────────────────────────────────
    Every changed file is a collapsible header with its diff inline underneath.
@@ -239,36 +204,8 @@ body.sheet-open #sheet { display: flex; }
     align-items: baseline;
     cursor: pointer;
 }
-.git-code {
-    flex: 0 0 auto;
-    font-weight: 700;
-    color: var(--accent);
-    font-size: 0.58rem;
-}
-.git-caret {
-    flex: 0 0 auto;
-    color: var(--text-muted);
-    font-size: 0.55rem;
-    width: 9px;
-}
-.git-name { flex: 1; min-width: 0; word-break: break-all; }
-
-/* The inline diff. Indented and rule-marked so it reads as belonging to the
-   header above it rather than as another list item. */
-.git-diff {
-    display: none;
-    margin: 0 0 6px 10px;
-    padding: 5px 0 5px 7px;
-    border-left: 2px solid var(--border-strong);
-    white-space: pre;
-    overflow-x: auto;          /* diffs are wide; scroll them, never wrap */
-    overscroll-behavior-x: contain;
-    font-size: 0.58rem;
-    line-height: 1.3;
-}
 .git-diff.open { display: block; }
 .git-row.open { background: var(--accent-dim); }
-
 /* Controls Section */
 #controls {
     background: var(--control-bg);
@@ -283,14 +220,12 @@ body.sheet-open #sheet { display: flex; }
     flex-shrink: 0;
     box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
 }
-
 .key-row {
     display: flex;
     gap: 0.4rem;
     justify-content: center;
     align-items: center;
 }
-
 /* Buttons */
 .btn {
     border: 1px solid var(--border);
@@ -306,24 +241,20 @@ body.sheet-open #sheet { display: flex; }
     -webkit-user-select: none;
     user-select: none;
 }
-
 .btn:active {
     transform: scale(0.96);
     background: var(--surface-bright);
 }
-
 .key-btn {
     height: 40px;
     flex: 1;
     font-family: var(--font-mono);
     color: var(--text-dim);
 }
-
 .key-btn:active {
     border-color: var(--accent);
     color: var(--accent);
 }
-
 .big-btn {
     height: 42px;
     flex: 1;
@@ -332,37 +263,26 @@ body.sheet-open #sheet { display: flex; }
     border-radius: 16px;
     border-width: 1.5px;
 }
-
 .btn-esc {
     background: rgba(220, 38, 38, 0.08);
     border-color: rgba(220, 38, 38, 0.25);
     color: var(--danger);
 }
-
 .btn-enter {
     background: rgba(5, 150, 105, 0.08);
     border-color: rgba(5, 150, 105, 0.25);
     color: var(--success);
 }
-
-.bar-btn {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-}
-
 .ham-yes {
     background: rgba(5, 150, 105, 0.1) !important;
     border-color: rgba(5, 150, 105, 0.3) !important;
     color: var(--success) !important;
 }
-
 .ham-no {
     background: rgba(220, 38, 38, 0.1) !important;
     border-color: rgba(220, 38, 38, 0.3) !important;
     color: var(--danger) !important;
 }
-
 .btn-mic {
     flex: 1;
     height: 42px;
@@ -372,7 +292,6 @@ body.sheet-open #sheet { display: flex; }
     font-weight: 700;
     letter-spacing: 0.05em;
 }
-
 #mic-btn.recording {
     background: var(--danger);
     border-color: #fff;
@@ -381,132 +300,13 @@ body.sheet-open #sheet { display: flex; }
     box-shadow: 0 0 0 4px var(--danger), 0 0 20px rgba(220, 38, 38, 0.6);
     animation: rec-pulse 1s infinite;
 }
-
-/* Tabs */
-#tab-bar {
-    overflow-x: auto;
-    scrollbar-width: none;
-    padding: 2px 0;
-}
-
-#tab-bar::-webkit-scrollbar { display: none; }
-
-.tab-btn {
-    min-height: 30px;
-    padding: 0.15rem 0.4rem;
-    border-radius: 15px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    font-size: 0.65rem;
-    font-weight: 600;
-    white-space: nowrap;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
-}
-
-.tab-btn > div {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .tab-btn.active {
     background: var(--accent);
     color: #fff;
     border-color: var(--accent);
     box-shadow: 0 4px 12px var(--accent-dim);
 }
-
-.tab-sub {
-    font-size: 0.6rem;
-    opacity: 0.8;
-    margin-top: -1px;
-}
-
-/* Overlay / Modals */
-#rename-overlay {
-    display: none;
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.85);
-    backdrop-filter: blur(8px);
-    z-index: 9999;
-    align-items: center;
-    justify-content: center;
-}
-
 #rename-overlay.open { display: flex; }
-
-#rename-box {
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
-    border-radius: 20px;
-    padding: 1.5rem;
-    width: 90%;
-    max-width: 360px;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-}
-
-#rename-box input {
-    width: 100%;
-    padding: 0.8rem 1rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 12px;
-    background: var(--bg);
-    color: #fff;
-    font-size: 1rem;
-    margin-bottom: 1rem;
-    outline: none;
-    font-family: var(--font-sans);
-}
-
-#rename-box input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
-
-#rename-suggestions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 1.25rem;
-}
-
-.rename-sug {
-    padding: 6px 12px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--surface-bright);
-    color: var(--text-dim);
-    font-size: 0.75rem;
-    cursor: pointer;
-}
-
-.rename-sug:active { background: var(--accent); color: #fff; }
-
-#rename-actions {
-    display: flex;
-    gap: 0.75rem;
-    justify-content: flex-end;
-}
-
-#rename-actions button {
-    padding: 0.6rem 1.2rem;
-    border: none;
-    border-radius: 10px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-#rename-cancel { background: var(--surface-bright); color: var(--text-dim); }
-#rename-save { background: var(--accent); color: #fff; }
-
 /* Session themes — CSS fallback for the blue/green/red/yellow cycle. applyTheme()
    in chat.html overrides --theme inline from each session's own color, so these
    are just the pre-JS fallback. Terminal bg colors are set by the ttyd themes in
@@ -514,51 +314,38 @@ body.sheet-open #sheet { display: flex; }
 /* Single warm accent for every session (Gruvbox faded orange). applyTheme()
    also sets this inline; kept here as the pre-JS fallback. */
 body[class*="theme-"] { --theme: #af3a03; --theme-dim: rgba(175,58,3,0.12); }
-
 body[class*="theme-"] .tab-btn.active { background: var(--theme); border-color: var(--theme); color: #fff; }
 body[class*="theme-"] .btn-esc { background: var(--theme-dim); border-color: var(--theme); color: var(--theme); }
 body[class*="theme-"] .btn-mic { background: var(--theme); border-color: var(--theme); color: var(--theme-text, #fff); }
 body[class*="theme-"] .btn-enter { background: var(--theme-dim); border-color: var(--theme); color: var(--theme); }
 body[class*="theme-"] #controls { border-top-color: var(--theme); }
-
 /* Recording override — always red+glow regardless of session theme */
 body[class*="theme-"] #mic-btn.recording {
     background: var(--danger);
     border-color: #fff;
 }
-
 /* Animations */
 @keyframes pulse {
     0%, 100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.05); opacity: 0.9; }
+50% { transform: scale(1.05); opacity: 0.9; }
 }
-
 @keyframes rec-pulse {
     0%, 100% { box-shadow: 0 0 0 4px var(--danger), 0 0 20px rgba(220, 38, 38, 0.6); }
-    50% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0.4), 0 0 30px rgba(220, 38, 38, 0.8); }
+50% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0.4), 0 0 30px rgba(220, 38, 38, 0.8); }
 }
-
-/* Utilities */
-.app-btn svg {
-    opacity: 0.7;
-}
-
 .app-btn.active {
     background: var(--accent) !important;
     color: #fff !important;
 }
-
 .app-btn.active svg {
     opacity: 1;
 }
-
 /* ── Thin control panel: minimal padding + gaps to give the terminal room ─── */
 #controls {
     gap: 0.3rem;
     padding: 0.35rem;
     padding-bottom: calc(0.35rem + var(--safe-bottom));
 }
-
 /* ── Terminal tabs: one solid-colored pill per terminal (color set inline) ─── */
 #term-bar {
     display: flex; gap: 0.35rem; padding: 0 0.2rem;
@@ -574,7 +361,6 @@ body[class*="theme-"] #mic-btn.recording {
     font-weight: 700;
     box-shadow: inset 0 0 0 2px rgba(255,255,255,0.9), 0 2px 8px rgba(0,0,0,0.28);
 }
-
 /* ── The middle pane ───────────────────────────────────────────────────
        Same #sheet the phone opens as a bottom sheet — docked as a column here
        instead of rebuilt. Every view already written (diff, file, charts)
@@ -591,34 +377,8 @@ body[class*="theme-"] #mic-btn.recording {
         box-shadow: none;
         z-index: 41;          /* above the rail's 40, below the toast */
     }
-    /* The bottom sheet needed 30vh of clearance for the phone controls; a
-       docked column has the controls beside it, not over it. */
-    /* Container #3 was the pane's own padding. Rows run edge to edge now;
-       only the prose and gallery views re-introduce a margin, because reading
-       wants one and a diff does not. */
-    #sheet-body { padding: 0 0 12px; font-size: 0.66rem; }
-    #sheet-body > .md, #sheet-body > .fv-grid, #sheet-body > table.csv { margin: 10px; }
-    #sheet-body > .fv-code, #sheet-body > .fv-img, #sheet-body > .fv-pdf { margin: 0 6px; }
-    /* Wrap in the pane: 400px cannot hold a long diff line, and a horizontal
-       scrollbar in a narrow column is worse than a wrapped line. */
-    #sheet-body { white-space: pre-wrap; word-break: break-word; }
-
-    /* 2026-10-02: the middle pane does not hide either — Patrick's call, same
-       as the rail. Three panes, permanent, resizable. The Hide button goes
-       away rather than becoming a no-op, because a button that does nothing is
-       worse than no button. The phone keeps its Close: there the sheet is an
-       overlay on top of the terminal and MUST be dismissable. */
-    #sheet-close { display: none; }
-
-    /* 📁 Files collapses the pane and hands the width back. This DOES rewrap
-       the terminal once — accepted, because it is a deliberate press, not a
-       side effect of opening a file picker. Listed last so it beats the
-       docked rules above at equal specificity. */
-    body.rail-collapsed #file-rail { display: none; }
-    body.rail-collapsed { --rail-w: 0px; }
-    body.rail-collapsed #sheet { left: 0; }
+body.rail-collapsed #sheet { left: 0; }
 }
-
 /* ── Splitter ─────────────────────────────────────────────────────────
        Drag the viewer/terminal boundary. Width is applied on RELEASE, not
        during the drag: every width change re-columns xterm and rewraps the
@@ -631,36 +391,7 @@ body[class*="theme-"] #mic-btn.recording {
        boundary: right-clicking tab 1 did nothing while every other tab worked.
        Found 2026-10-06. */
     #controls { position: relative; z-index: 60; }
-
-    .splitter {
-        display: block;
-        position: fixed;
-        top: 0;
-        bottom: 0;
-        width: 7px;
-        margin-left: -3px;
-        z-index: 55;
-        cursor: col-resize;
-        background: transparent;
-    }
-    .splitter:hover { background: var(--accent-glow); }
-    /* Two boundaries, two handles: files|viewer and viewer|terminal. */
-    #splitter-rail { left: var(--rail-w); }
-    #splitter { left: calc(var(--rail-w) + var(--mid-w)); }
-    #split-guide {
-        display: none;
-        position: fixed;
-        top: 0;
-        bottom: 0;
-        width: 2px;
-        background: var(--accent);
-        z-index: 70;
-        pointer-events: none;
-    }
-    body.splitting #split-guide { display: block; }
-    body.splitting { cursor: col-resize; user-select: none; }
 }
-
 /* ── Polish pass (2026-10-02) ──────────────────────────────────────────────
    Rules of the house, so this stays smooth as it grows:
 
@@ -680,8 +411,6 @@ body[class*="theme-"] #mic-btn.recording {
 /* The press feedback is a transform, so it costs nothing. */
 .rail-row:active, .gfile:active, .proj-cell:active { transform: scale(0.995); }
 .fv-cell:active { transform: scale(0.98); }
-.gcaret { transition: transform 120ms ease; }
-
 /* Keyboard reachability — this is a desktop app now, so focus has to be
    visible. outline does not affect layout, unlike a border. */
 .rail-row:focus-visible, .gfile:focus-visible, .proj-cell:focus-visible,
@@ -689,7 +418,6 @@ body[class*="theme-"] #mic-btn.recording {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
 }
-
 /* Long lists: skip layout for rows that are off screen. contain-intrinsic-size
    gives the scrollbar a believable estimate so it does not jump around while
    you scroll. */
@@ -700,23 +428,12 @@ body[class*="theme-"] #mic-btn.recording {
 /* The gallery is images, which are the expensive case — these also carry
    loading="lazy" in the markup. */
 .fv-cell { content-visibility: auto; contain-intrinsic-size: auto 150px; }
-
-/* Scrollbars that match the theme instead of the OS default. */
-#sheet-body, #rail-list, .fv-code { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
-#sheet-body::-webkit-scrollbar, #rail-list::-webkit-scrollbar { width: 9px; height: 9px; }
-#sheet-body::-webkit-scrollbar-thumb, #rail-list::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
-    border-radius: 5px;
-}
-#sheet-body::-webkit-scrollbar-track, #rail-list::-webkit-scrollbar-track { background: transparent; }
-
 @media (prefers-reduced-motion: reduce) {
     .rail-row, .gfile, .proj-cell, .fv-cell, #git-bar, .gcaret, .rail-ins, .gopen {
         transition: none;
     }
-    .rail-row:active, .gfile:active, .proj-cell:active, .fv-cell:active { transform: none; }
+.rail-row:active, .gfile:active, .proj-cell:active, .fv-cell:active { transform: none; }
 }
-
 /* ── The chrome, made to shine ─────────────────────────────────────────────
    With the panes gone the control bar IS the interface, so it gets the
    attention: flat and crisp rather than frosted, one clear hierarchy —
@@ -730,7 +447,6 @@ body[class*="theme-"] #mic-btn.recording {
     padding: 0.5rem 0.55rem;
     gap: 0.45rem;
 }
-
 /* Tabs: one row, project names, only the active one filled. */
 #term-bar { gap: 4px; padding: 0 1px; }
 .term-pill {
@@ -746,7 +462,6 @@ body[class*="theme-"] #mic-btn.recording {
 }
 .term-pill:hover { background: var(--surface-bright); color: var(--text); }
 .term-pill.active { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85); }
-
 /* The type bar is where the words go — give it presence. */
 #type-bar {
     height: 36px !important;
@@ -755,79 +470,85 @@ body[class*="theme-"] #mic-btn.recording {
     border: 1px solid var(--border-strong) !important;
 }
 #type-bar:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-
 /* MIC is the hero: it is the thing you actually press all day. */
 .big-btn { border-radius: 9px; font-weight: 700; letter-spacing: 0.04em; }
 .btn-mic { flex: 2 1 auto; height: 46px !important; font-size: 0.92rem; }
 .btn-esc, .btn-enter { font-size: 0.78rem; }
-
 /* Secondary keys: present, not shouting. */
 .key-btn { border-radius: 7px; }
 .key-btn:hover { background: var(--surface-bright); }
-
-/* ── Workspace menu ────────────────────────────────────────────────────────
-   Right-click (or long-press) a tab: a small window at the pointer for
-   choosing which project that terminal is on, with a filter because /dev has
-   116 folders. The only menu left in Spark. */
-#pmenu {
-    position: fixed;
-    z-index: 200;
-    width: 272px;
-    max-height: 60vh;
-    display: flex;
-    flex-direction: column;
-    background: var(--surface-bright);
-    border: 1px solid #8a8072;
-    border-radius: 4px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-    overflow: hidden;
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: auto;
-}
-.pm-head {
-    padding: 7px 10px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    font-size: 0.66rem;
-    font-weight: 700;
-    color: var(--text);
-}
-#pm-filter {
-    flex: 0 0 auto;
-    margin: 6px;
-    height: 30px;
-    border: 1px solid var(--border-strong);
-    border-radius: 3px;
-    padding: 0 8px;
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    background: #fff;
-    color: var(--text);
-}
-#pm-filter:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-.pm-list { flex: 1 1 auto; overflow-y: auto; }
-.pm-row {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    padding: 5px 10px;
-    cursor: pointer;
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    transition: background-color 110ms ease;
-}
 .pm-row:hover, .pm-row.hot { background: #e8dcc0; font-weight: 600; }
-.pm-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.pm-kind { flex: 0 0 auto; color: var(--text-muted); font-size: 0.66rem; }
 .pm-row.current { font-weight: 700; border-left: 2px solid var(--accent); padding-left: 8px; }
-.pm-none { color: var(--text-muted); cursor: default; }
-.pm-foot {
-    flex: 0 0 auto;
-    padding: 6px 10px;
-    border-top: 1px solid var(--border);
-    color: var(--accent);
-    font-size: 0.68rem;
-    cursor: pointer;
-}
-.pm-foot:hover { background: var(--accent-dim); }
 [data-armed]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* ── Full-bleed mode ───────────────────────────────────────────────────────
+   Two modes and a toggle. Normal has the control bar; full hides every piece
+   of Spark's own UI and gives the entire window to the terminal iframe.
+
+   The toggle is the one survivor: 18px, top-right, dim until you point at it.
+   It has to stay visible — a mode with nothing to click is a trap for anyone
+   without the controller in hand. Typing also exits, which covers the rest. */
+#full-toggle {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 30px;
+    height: 22px;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    line-height: 1;
+    /* DARK on purpose. The first version used var(--surface) — cream — on top
+       of a cream terminal at 45% opacity, which made it invisible: present in
+       the DOM, impossible to find on screen. A control that is the only way
+       out of a mode has to be the one thing that contrasts. */
+    color: #f2e9d8;
+    background: #3c3836;
+    border: none;
+    border-bottom-left-radius: 5px;
+    box-shadow: -1px 1px 4px rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    opacity: 0.8;
+    transition: opacity 120ms ease, background-color 120ms ease;
+    user-select: none;
+}
+#full-toggle:hover { opacity: 1; background: var(--accent); }
+/* Full: nothing of ours left but the toggle. */
+body.zen #controls { display: none; }
+body.zen #bottom-buffer { display: none; }
+/* Android's nav bar overlaps the bottom of a browser tab, so a 100vh terminal
+   puts its last line under the lip. --safe-bottom is already the number for
+   this (6px installed, 16px unfolded, 80px folded in a tab), so full mode
+   borrows it rather than inventing a second value. The lift only applies where
+   the lip exists — a desktop window keeps the whole height. */
+/* --full-bottom, not --safe-bottom. The latter is tuned for the CONTROL BAR
+   and resolves to 16px on the unfolded phone, which is about half of the real
+   lip: MEASURED by Patrick 2026-10-07 at roughly 30px of Android nav bar in a
+   browser tab. Android Chrome also mostly declines to answer env(), so the
+   FALLBACK is what ships — 32px, with a little margin over the measurement.
+   Installed as a PWA there is no nav bar at all, hence the 6px below. */
+/* dvh already excludes the browser chrome, so --full-bottom only has to cover
+   the Android NAV BAR, which dvh does not account for. Kept small for that
+   reason: 10px in a tab, 0 installed (no nav bar) and 0 on desktop. */
+body.zen .terminal-wrap,
+body.zen .terminal-wrap.term-hidden {
+    height: calc(100vh - var(--full-bottom));
+    height: calc(100dvh - var(--full-bottom));
+}
+body.zen .terminal-frame {
+    height: calc(100vh - var(--full-bottom));
+    height: calc(100dvh - var(--full-bottom));
+}
+body.zen.big-text .terminal-frame {
+    height: calc((100vh - var(--full-bottom)) / 1.18);
+    height: calc((100dvh - var(--full-bottom)) / 1.18);
+}
+@media (min-width: 1100px) {
+    :root { --full-bottom: 0px; }
+/* a desktop window has no lip */
+    body.zen .terminal-wrap,
+    body.zen .terminal-wrap.term-hidden,
+    body.zen .terminal-frame { height: 100vh; height: 100dvh; }
+body.zen.big-text .terminal-frame { height: calc(100dvh / 1.18); }
+}

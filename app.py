@@ -833,27 +833,6 @@ def api_sessions():
         d["running"] = cmd
         d["alive"] = bool(cmd) and cmd not in _SHELLS
 
-        cwd = ""
-        try:
-            raw = _wsl_to_win(pane.get("path") or "")
-            if raw:
-                pth = Path(raw).resolve()
-                if pth == root or pth.is_relative_to(root):
-                    cwd = "" if pth == root else \
-                        str(pth.relative_to(root)).replace("\\", "/")
-        except Exception:
-            pass
-        d["cwd"] = cwd
-
-        # The tab's label comes from its WORKSPACE, not its pane cwd. The
-        # workspace is what Patrick assigns and what the panes follow; a pane's
-        # cwd is wherever its shell happens to sit (all seven sit at /dev root).
-        # Last segment only: "revel/atrium" is the folder, "atrium" is the name
-        # he calls it.
-        ws_folder = _workspace(s["id"])["folder"]
-        folder = ws_folder or cwd
-        d["folder"] = folder
-        d["project"] = (folder.rstrip("/").split("/")[-1] if folder else "dev")
         # Manual names win — "election" is not a folder name, and Patrick
         # should keep the right to call a slot whatever he wants.
         d["named"] = bool(names.get(s["id"]))
@@ -1094,197 +1073,6 @@ def _folder_kind(target):
     return "info" if doc > code else "code"
 
 
-@app.route("/api/files")
-def api_files():
-    """Directory listing for the rail. ?path= is relative to FILES_ROOT;
-    omit it to follow the active terminal's cwd."""
-    raw = request.args.get("path")
-    if raw is None:
-        raw = _pane_cwd_rel(_resolve_session({"session": request.args.get("session")}))
-    target = _files_safe(raw)
-    if target is None or not target.exists():
-        target = FILES_ROOT.resolve()
-    if target.is_file():
-        target = target.parent
-
-    dirs, files = [], []
-    try:
-        for e in sorted(target.iterdir(), key=lambda x: x.name.lower()):
-            if e.name.startswith(".") or e.name in _FILES_SKIP:
-                continue
-            (dirs if e.is_dir() else files).append(e.name)
-    except PermissionError:
-        pass
-
-    root = FILES_ROOT.resolve()
-    rel = "" if target == root else str(target.relative_to(root)).replace("\\", "/")
-    # parent: None at the root (so the UI hides the ".." row), "" one level down
-    # (meaning "go to the root"), otherwise the parent's relative path.
-    if not rel:
-        parent = None
-    else:
-        up = str(Path(rel).parent).replace("\\", "/")
-        parent = "" if up == "." else up
-    return jsonify({
-        "root": str(root).replace("\\", "/"),
-        "path": rel,
-        "parent": parent,
-        "kind": _folder_kind(target),
-        "dirs": dirs[:400],
-        "files": files[:400],
-    })
-
-
-# --- Workspaces ------------------------------------------------------------
-# A terminal is not just a pane any more, it is a WORKSPACE: a folder, the file
-# you had open, and which view the middle pane was showing. Switching tabs
-# restores all three, so tab 5 is "vigor, looking at the charts" and tab 2 is
-# "camino, reading that PDF" — and the file rail is that folder's explorer, not
-# a browser of all of /dev.
-#
-# Server-side rather than localStorage on purpose: the phone and the desktop
-# are the same seven workspaces, and Patrick would rather have the state in a
-# file he can read than in a browser he cannot.
-_WS_FILE = _SPARK_DIR / "_workspaces.json"
-
-
-def _load_workspaces():
-    try:
-        d = json.loads(_WS_FILE.read_text(encoding="utf-8"))
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-def _save_workspaces(d):
-    try:
-        _WS_FILE.write_text(json.dumps(d, indent=1), encoding="utf-8")
-    except OSError:
-        pass
-
-
-def _workspace(sid):
-    """One session's workspace, falling back to its pane cwd then to /dev."""
-    ws = _load_workspaces().get(str(sid)) or {}
-    folder = ws.get("folder")
-    if folder is None:
-        # Never been set: start where the pane actually is.
-        tmux = next((x["tmux"] for x in SESSIONS if x["id"] == str(sid)), None)
-        folder = _pane_cwd_rel(tmux) if tmux else ""
-    return {
-        "folder": folder or "",
-        "file": ws.get("file") or "",
-        "view": ws.get("view") or "",
-    }
-
-
-@app.route("/api/workspace", methods=["GET", "POST"])
-def api_workspace():
-    """GET ?session=N -> that workspace. POST {session, folder?, file?, view?}.
-
-    Partial writes: only the keys present are changed, so saving the open file
-    does not clobber the folder.
-    """
-    if request.method == "GET":
-        sid = request.args.get("session") or _active_session_id
-        return jsonify(_workspace(sid))
-
-    data = request.get_json() or {}
-    sid = str(data.get("session") or _active_session_id)
-    all_ws = _load_workspaces()
-    ws = all_ws.get(sid) or {}
-    for key in ("folder", "file", "view"):
-        if key in data:
-            val = (data.get(key) or "").strip().strip("/")
-            if key in ("folder", "file") and val:
-                # Everything stored is /dev-relative and guarded on the way in.
-                if _files_safe(val) is None:
-                    return jsonify({"error": "outside /dev"}), 400
-            ws[key] = val
-    all_ws[sid] = ws
-    _save_workspaces(all_ws)
-    return jsonify({"ok": True, **_workspace(sid)})
-
-
-@app.route("/api/projects")
-def api_projects():
-    """Top-level /dev folders, with each one's kind — the project picker."""
-    root = FILES_ROOT.resolve()
-    out = []
-    try:
-        for e in sorted(root.iterdir(), key=lambda x: x.name.lower()):
-            if e.is_dir() and not e.name.startswith(".") and e.name not in _FILES_SKIP:
-                out.append({"name": e.name, "kind": _folder_kind(e)})
-    except (OSError, PermissionError):
-        pass
-    return jsonify({"projects": out})
-
-
-@app.route("/api/project/new", methods=["POST"])
-def api_project_new():
-    """Create a project: folder, git repo, .gitignore, README, first commit.
-
-    The first five minutes of a fresh build are mkdir, git init, a .gitignore,
-    a README and a commit — all of it typing, none of it thinking, and all of
-    it on screen if someone is watching. This does the lot in one call and
-    hands back a folder that is already a repo with history.
-
-    Deliberately NOT a scaffold: no framework, no src/, no chosen stack. What
-    the project is gets decided after the problem is read, not before.
-    """
-    data = request.get_json() or {}
-    raw = (data.get("name") or "").strip().strip("/")
-    # One path segment, conservative character set — this creates directories.
-    if not raw or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{0,48}", raw):
-        return jsonify({"error": "name must be letters, numbers, - or _"}), 400
-    name = raw.replace(" ", "_").lower()
-
-    target = _files_safe(name)
-    if target is None:
-        return jsonify({"error": "outside /dev"}), 400
-    if target.exists():
-        return jsonify({"error": f"{name} already exists"}), 400
-
-    try:
-        target.mkdir(parents=True)
-    except OSError as e:
-        return jsonify({"error": str(e)[:120]}), 500
-
-    (target / ".gitignore").write_text("\n".join([
-        ".env", "*.log", "*.pyc", "__pycache__/", ".venv/", "venv/",
-        "node_modules/", "token.json", "credentials.json", "*.sqlite",
-        ".DS_Store", "",
-    ]), encoding="utf-8")
-    (target / "README.md").write_text(
-        f"# {name}\n\nCreated {datetime.now().strftime('%Y-%m-%d')}.\n\n"
-        "## What this is\n\n_One sentence, written before the first line of code._\n",
-        encoding="utf-8")
-
-    rc, _ = _git(target, "init")
-    if rc != 0:
-        return jsonify({"error": "git init failed", "path": name}), 500
-    # Without this, Windows git normalises the LF files written above to CRLF
-    # on checkout and the brand-new repo reports modified files one second
-    # after its first commit. A fresh project should be clean.
-    _git(target, "config", "core.autocrlf", "false")
-    _git(target, "branch", "-M", "main")
-    _git(target, "add", "-A")
-    # An empty-ish first commit on purpose: it is the floor to fall back to,
-    # and everything after it is readable as a diff against "nothing".
-    _git(target, "-c", "user.useConfigOnly=false",
-         "commit", "-m", f"{name}: empty project, git from the first minute")
-
-    # Point a terminal at it if the caller asked.
-    sid = str(data.get("session") or "")
-    if sid:
-        all_ws = _load_workspaces()
-        all_ws[sid] = {"folder": name, "file": "", "view": ""}
-        _save_workspaces(all_ws)
-
-    rc, log = _git(target, "--no-pager", "log", "--oneline", "-1")
-    return jsonify({"ok": True, "path": name, "first_commit": log.strip()})
-
-
 @app.route("/dashboard")
 def dashboard_page():
     resp = make_response(render_template("dashboard.html",
@@ -1310,7 +1098,7 @@ def api_dashboard():
     # he means by "what am I working on".
     git = {"repo": None, "changed": 0, "branch": None}
     try:
-        folder = _workspace(s["id"])["folder"] or _pane_cwd_rel(s["tmux"])
+        folder = _pane_cwd_rel(s["tmux"])
         target = _files_safe(folder) or FILES_ROOT.resolve()
         repo = _git_root(target if target.is_dir() else target.parent)
         if repo is not None:
@@ -1330,7 +1118,7 @@ def api_dashboard():
     # changed in the last few minutes answers that better than scrollback does.
     activity = []
     try:
-        folder = _workspace(s["id"])["folder"]
+        folder = _pane_cwd_rel(s["tmux"])
         base = _files_safe(folder) if folder else None
         if base is not None and base.is_dir():
             found = []
@@ -1360,7 +1148,6 @@ def api_dashboard():
                     "tmux": s["tmux"], "model": s.get("model")},
         "screen": text,
         "git": git,
-        "workspace": _workspace(s["id"])["folder"],
         "activity": activity,
         "sessions": [{"id": x["id"], "name": x["name"], "color": x.get("color")}
                      for x in SESSIONS],

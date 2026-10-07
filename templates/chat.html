@@ -25,7 +25,7 @@
     <link rel="apple-touch-icon" href="/static/icon-192.png">
     <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=9.5">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=10.0">
     <!-- UI colors from theme.json (overrides style.css :root). Edit theme.json,
          restart the Spark app, and refresh to recolor the chrome. -->
     <style>
@@ -960,18 +960,18 @@ function toggleTextSize() {
     setStatus(_largeText ? 'Big text' : 'Normal text');
 }
 
-// --- File rail ------------------------------------------------------------
-// Tap a folder to walk into it; tap a file and its path lands in the type-bar,
-// which is the entire reason this exists — dictating a path by voice is the
-// worst friction in Spark, and tapping one is instant.
-// Paths inserted are relative to /mnt/c/dev, matching how the terminals' cwd is
-// usually set, so "spark/templates/chat.html" is what Claude Code expects.
-let _railPath = null;        // where the rail is RIGHT NOW (may be a subfolder)
-let _railKind = 'code';      // 'code' | 'info' | 'charts' — drives the pane
-// The active terminal's workspace: its folder, the file it had open, and which
-// view the middle pane was showing. The rail is this FOLDER's explorer — it
-// does not walk above it, which is the difference between a file browser and a
-// project pane. Change projects deliberately, through the picker.
+// --- Workspaces ------------------------------------------------------------
+// A terminal is a workspace: a folder, the file it had open, and which view
+// the middle pane was showing. Stored server-side in _workspaces.json, because
+// the phone and the desktop are the same seven workspaces and Patrick would
+// rather have the state in a file he can read than in a browser he cannot.
+//
+// 2026-10-06: these four were destroyed when the file tree replaced the old
+// path-walking rail — they had been defined inside that block. Nothing threw
+// visibly; wsSave was simply undefined, so the first line of showFile and of
+// openProject raised, and clicking a file or picking a workspace did nothing
+// at all. Restored here, in their own section, where a rail rewrite cannot
+// take them with it.
 let _ws = {folder: '', file: '', view: ''};
 
 async function wsLoad(sid) {
@@ -980,24 +980,6 @@ async function wsLoad(sid) {
         _ws = await r.json();
     } catch (e) { _ws = {folder: '', file: '', view: ''}; }
     return _ws;
-}
-
-// Point the whole left-and-middle at the active terminal's workspace: its
-// folder in the rail, its open file (or its kind's default view) in the pane.
-//
-// 2026-10-02: this lived inside syncSession(), which only runs on
-// visibilitychange — so switching tabs changed the terminal and nothing else,
-// and the panes only caught up if you alt-tabbed away and back. Both callers
-// share it now; there is exactly one place that knows how to follow a tab.
-async function workspaceFollow() {
-    if (!DOCKED() && !document.body.classList.contains('rail-open')) return;
-    await wsLoad(ACTIVE_SESSION);
-    await loadRail(_ws.folder || null);
-    // Always the diff on a tab switch. The workspace still REMEMBERS the file
-    // you had open (it is one click away in the rail), but landing on a tab
-    // should answer "what changed here", which is the question you have when
-    // you switch to a terminal an agent has been working in.
-    paneDefault();
 }
 
 // Partial save — only the keys passed are written, so storing the open file
@@ -1010,113 +992,51 @@ function wsSave(patch) {
     }).catch(() => {});
 }
 
-async function loadRail(path) {
-    const q = (path === null || path === undefined)
-        ? '?session=' + encodeURIComponent(ACTIVE_SESSION)
-        : '?path=' + encodeURIComponent(path);
-    let d;
+// Point the whole left-and-middle at the active terminal's workspace: its
+// folder in the tree, the diff (or its kind's default view) in the pane.
+async function workspaceFollow() {
+    if (!DOCKED() && !document.body.classList.contains('rail-open')) return;
+    await wsLoad(ACTIVE_SESSION);
+    await loadRail(_ws.folder || null);
+    paneDefault();
+}
+
+// --- File tree -------------------------------------------------------------
+// VS Code's shape: you do not NAVIGATE into a folder, you expand it in place
+// and the tree grows downward. The level you are on never changes, so you keep
+// your bearings — which is the whole reason a tree beats a path-walker.
+//
+// Changing the workspace is a separate, deliberate act (the project picker).
+// The tree never walks above its root; there is no ".." row at all.
+//
+// No file-type icons. A chevron for folders, nothing for files, and vertical
+// guide lines for depth. Icons were colour and noise at 170px; lines are
+// structure, which is what you actually read in a tree.
+let _railPath = null;        // the workspace root this tree is showing
+let _railKind = 'code';      // 'code' | 'info' | 'charts' — drives the pane
+let _treeOpen = new Set();   // relative paths of expanded folders
+
+function treeKey() { return 'spark.tree.' + (_ws.folder || ''); }
+
+function treeSave() {
+    try { localStorage.setItem(treeKey(), JSON.stringify([..._treeOpen])); }
+    catch (e) {}
+}
+
+function treeLoad() {
     try {
-        const r = await fetch('/api/files' + q);
-        d = await r.json();
-    } catch (e) {
-        setStatus('Files unavailable');
-        return;
-    }
-    _railPath = d.path;
-    _railKind = d.kind || 'code';
-    // The rail header carries the kind, because the kind decides what the
-    // middle pane shows: a code folder has diffs, a chart folder has pictures.
-    const KIND_ICON = {code: '⌨️', info: '📄', charts: '📊'};
-    loadGitBar();
-    loadArch();
-    const head = document.getElementById('rail-head');
-    head.textContent = (KIND_ICON[_railKind] || '') + ' ' + (d.path || '/dev');
-    head.title = 'Change project';
-    head.onclick = showProjects;
-    const list = document.getElementById('rail-list');
-    list.innerHTML = '';
-
-    // One row = [icon][name][+]. The icon is a fixed-width column so the names
-    // line up into a readable left edge instead of a ragged one.
-    const row = (icon, label, cls, fn, insertRel) => {
-        const el = document.createElement('div');
-        el.className = 'rail-row ' + cls;
-        const ic = document.createElement('span');
-        ic.className = 'rail-icon';
-        ic.textContent = icon;
-        const nm = document.createElement('span');
-        nm.className = 'rail-name';
-        const short = midTrunc(label, 24);
-        nm.textContent = short;
-        // The full name is never destroyed — it lives on the node, so hovering
-        // or selecting a row can show all of it without a second fetch. A
-        // tooltip alone is a bad answer: slow on desktop, absent on a phone.
-        if (short !== label) {
-            nm.title = label;
-            el.onmouseenter = () => { if (!el.classList.contains('sel')) nm.textContent = label; };
-            el.onmouseleave = () => { if (!el.classList.contains('sel')) nm.textContent = short; };
-            el.dataset.full = label;
-            el.dataset.short = short;
-        }
-        el.appendChild(ic);
-        el.appendChild(nm);
-        el.onclick = () => {
-            // Selection does two jobs: it keeps the long name expanded so you
-            // can read it, and it marks which file the pane is showing.
-            list.querySelectorAll('.rail-row.sel').forEach(r => {
-                r.classList.remove('sel');
-                if (r.dataset.short) {
-                    const n = r.querySelector('.rail-name');
-                    if (n) n.textContent = r.dataset.short;
-                }
-            });
-            el.classList.add('sel');
-            if (el.dataset.full) nm.textContent = el.dataset.full;
-            fn();
-        };
-        // The rail's ORIGINAL job was putting a path in the type-bar — that is
-        // why it exists at all, and dictating a path by voice is miserable. The
-        // row tap now opens the file instead, so that job moves to its own
-        // button rather than disappearing.
-        if (insertRel) {
-            const ins = document.createElement('span');
-            ins.className = 'rail-ins';
-            ins.textContent = '+';
-            ins.title = 'Put this path in the type bar';
-            ins.onclick = (e) => { e.stopPropagation(); insertPath(insertRel); };
-            el.appendChild(ins);
-        }
-        list.appendChild(el);
-    };
-
-    // ".." stops at the workspace folder. Above that is a different project,
-    // and you change projects through the picker, not by wandering up.
-    const atTop = (d.path || '') === (_ws.folder || '');
-    if (!atTop && d.parent !== null && d.parent !== undefined) {
-        row('\u21b0', '.. up', 'rail-up', () => loadRail(d.parent), null);
-    }
-    (d.dirs || []).forEach(name => {
-        const child = d.path ? d.path + '/' + name : name;
-        row('\ud83d\udcc1', name, 'rail-dir', () => loadRail(child), child);
-    });
-    (d.files || []).forEach(name => {
-        const full = d.path ? d.path + '/' + name : name;
-        row(fileIcon(name), name, 'rail-file', () => showFile(full), full);
-    });
+        const v = JSON.parse(localStorage.getItem(treeKey()) || '[]');
+        _treeOpen = new Set(Array.isArray(v) ? v : []);
+    } catch (e) { _treeOpen = new Set(); }
 }
 
 // Long names, truncated in the MIDDLE rather than the end.
 //
-// End-truncation is what most file lists do (VS Code, browsers) and it is the
-// wrong choice for this workspace. camino's filenames are prefix-grouped —
-// financial_docs_chase_bank_statement_combined_accounts.pdf,
-// financial_docs_patrick_cc_statement_sapphire_preferred.pdf — so cutting the
-// tail leaves a column of identical "financial_docs_cha…" rows. The END is
-// what distinguishes them, and the extension lives there too.
-//
-// So: keep the head for context, the tail for identity, the extension always.
-// Finder and Explorer both do this. Full name on hover, and the viewer's title
-// bar always shows the whole path anyway.
+// End-truncation is what most file lists do and it is wrong for this
+// workspace: camino's filenames are prefix-grouped — financial_docs_chase_...,
+// financial_docs_patrick_... — so cutting the tail leaves a column of
+// identical rows. The END distinguishes them, and the extension lives there.
+// Head for context, tail for identity, extension always. Full name on hover.
 function midTrunc(name, max) {
     if (!name || name.length <= max) return name;
     const dot = name.lastIndexOf('.');
@@ -1128,40 +1048,126 @@ function midTrunc(name, max) {
     return base.slice(0, head) + '\u2026' + base.slice(base.length - tail) + ext;
 }
 
-// File-type icons. Emoji, deliberately: no icon font to load, no sprite sheet,
-// works with the service worker offline, and renders on the phone and the
-// desktop identically. Keyed longest-suffix-first so ".tar.gz" can beat ".gz".
-const FILE_ICONS = [
-    ['.py', '\ud83d\udc0d'], ['.ipynb', '\ud83d\udcd3'],
-    ['.js', '\ud83d\udcdc'], ['.mjs', '\ud83d\udcdc'], ['.ts', '\ud83d\udcd8'],
-    ['.jsx', '\u269b\ufe0f'], ['.tsx', '\u269b\ufe0f'],
-    ['.html', '\ud83c\udf10'], ['.htm', '\ud83c\udf10'],
-    ['.css', '\ud83c\udfa8'], ['.scss', '\ud83c\udfa8'],
-    ['.md', '\ud83d\udcdd'], ['.txt', '\ud83d\udcc4'], ['.log', '\ud83e\uddfe'],
-    ['.json', '\u2699\ufe0f'], ['.yml', '\u2699\ufe0f'], ['.yaml', '\u2699\ufe0f'],
-    ['.toml', '\u2699\ufe0f'], ['.ini', '\u2699\ufe0f'], ['.cfg', '\u2699\ufe0f'],
-    ['.env', '\ud83d\udd11'], ['.pem', '\ud83d\udd11'], ['.key', '\ud83d\udd11'],
-    ['.csv', '\ud83d\udcca'], ['.xlsx', '\ud83d\udcca'], ['.jsonl', '\ud83d\udcca'],
-    ['.pdf', '\ud83d\udcd5'],
-    ['.png', '\ud83d\uddbc\ufe0f'], ['.jpg', '\ud83d\uddbc\ufe0f'],
-    ['.jpeg', '\ud83d\uddbc\ufe0f'], ['.gif', '\ud83d\uddbc\ufe0f'],
-    ['.svg', '\ud83d\uddbc\ufe0f'], ['.ico', '\ud83d\uddbc\ufe0f'],
-    ['.wav', '\ud83d\udd0a'], ['.mp3', '\ud83d\udd0a'], ['.onnx', '\ud83e\udde0'],
-    ['.bat', '\ud83d\udd27'], ['.sh', '\ud83d\udd27'], ['.ps1', '\ud83d\udd27'],
-    ['.sql', '\ud83d\uddc3\ufe0f'], ['.db', '\ud83d\uddc3\ufe0f'],
-    ['.sqlite', '\ud83d\uddc3\ufe0f'],
-    ['.zip', '\ud83d\udce6'], ['.gz', '\ud83d\udce6'], ['.whl', '\ud83d\udce6'],
-    ['.docx', '\ud83d\udcc3'], ['.pptx', '\ud83d\udcc3'],
-];
+// One row. `depth` draws the guide lines; folders get a chevron, files do not.
+function treeRow(parent, {name, rel, isDir, depth}) {
+    const row = document.createElement('div');
+    row.className = 'tr' + (isDir ? ' tr-dir' : ' tr-file');
+    row.style.setProperty('--d', depth);
 
-function fileIcon(name) {
-    const n = name.toLowerCase();
-    if (n === 'dockerfile' || n === 'makefile') return '\ud83d\udd27';
-    if (n.startsWith('requirements')) return '\ud83d\udce6';
-    for (const [ext, icon] of FILE_ICONS) {
-        if (n.endsWith(ext)) return icon;
+    const tw = document.createElement('span');
+    tw.className = 'tr-twist';
+    tw.textContent = isDir ? '›' : '';
+    const nm = document.createElement('span');
+    nm.className = 'tr-name';
+    const short = midTrunc(name, Math.max(10, 26 - depth * 2));
+    nm.textContent = short;
+    if (short !== name) nm.title = name;
+    row.appendChild(tw);
+    row.appendChild(nm);
+
+    // The rail's original job: put a path in the type bar. Hover-revealed so
+    // it does not compete with the name.
+    const ins = document.createElement('span');
+    ins.className = 'tr-ins';
+    ins.textContent = '+';
+    ins.title = 'Put this path in the type bar';
+    ins.onclick = (e) => { e.stopPropagation(); insertPath(rel); };
+    row.appendChild(ins);
+
+    parent.appendChild(row);
+
+    if (!isDir) {
+        row.onclick = () => {
+            parent.parentNode.querySelectorAll('.tr.sel')
+                .forEach(r => r.classList.remove('sel'));
+            row.classList.add('sel');
+            showFile(rel);
+        };
+        return row;
     }
-    return '\ud83d\udcc4';
+
+    // A folder owns a child container that appears beneath it.
+    const kids = document.createElement('div');
+    kids.className = 'tr-kids';
+    parent.appendChild(kids);
+
+    row.onclick = async () => {
+        const open = row.classList.toggle('open');
+        if (!open) {
+            kids.innerHTML = '';
+            _treeOpen.delete(rel);
+            treeSave();
+            return;
+        }
+        _treeOpen.add(rel);
+        treeSave();
+        await treeFill(kids, rel, depth + 1);
+    };
+
+    // Restore: a folder that was open last time opens again.
+    if (_treeOpen.has(rel)) {
+        row.classList.add('open');
+        treeFill(kids, rel, depth + 1);
+    }
+    return row;
+}
+
+// Fetch one level and lay it out: folders first, then files.
+async function treeFill(host, rel, depth) {
+    let d;
+    try {
+        d = await (await fetch('/api/files?path=' + encodeURIComponent(rel))).json();
+    } catch (e) { return; }
+    host.innerHTML = '';
+    (d.dirs || []).forEach(name => treeRow(host, {
+        name, rel: (d.path ? d.path + '/' : '') + name, isDir: true, depth,
+    }));
+    (d.files || []).forEach(name => treeRow(host, {
+        name, rel: (d.path ? d.path + '/' : '') + name, isDir: false, depth,
+    }));
+}
+
+async function loadRail(path) {
+    const q = (path === null || path === undefined)
+        ? '?session=' + encodeURIComponent(ACTIVE_SESSION)
+        : '?path=' + encodeURIComponent(path);
+    let d;
+    try {
+        d = await (await fetch('/api/files' + q)).json();
+    } catch (e) {
+        setStatus('Files unavailable');
+        return;
+    }
+    _railPath = d.path;
+    _railKind = d.kind || 'code';
+    treeLoad();
+
+    loadGitBar();
+    loadArch();
+
+    // The header names the workspace and is the way to change it. It is the
+    // only place the tree's root can move.
+    const KIND = {code: 'code', info: 'docs', charts: 'charts'};
+    const head = document.getElementById('rail-head');
+    head.textContent = (d.path || '/dev');
+    head.title = 'Change workspace';
+    const tagEl = document.createElement('span');
+    tagEl.className = 'rh-kind';
+    tagEl.textContent = KIND[_railKind] || '';
+    head.appendChild(tagEl);
+    head.onclick = showProjects;
+
+    const list = document.getElementById('rail-list');
+    list.innerHTML = '';
+    const rootKids = document.createElement('div');
+    rootKids.className = 'tr-root';
+    list.appendChild(rootKids);
+    (d.dirs || []).forEach(name => treeRow(rootKids, {
+        name, rel: (d.path ? d.path + '/' : '') + name, isDir: true, depth: 0,
+    }));
+    (d.files || []).forEach(name => treeRow(rootKids, {
+        name, rel: (d.path ? d.path + '/' : '') + name, isDir: false, depth: 0,
+    }));
 }
 
 // Append the path to whatever is already typed, so you can dictate
@@ -1701,7 +1707,13 @@ function toggleRail() {
 // The project picker. Lives in the middle pane rather than a dropdown, because
 // there are ~100 folders in /dev and a dropdown that long is unusable. Picking
 // one re-points THIS terminal's workspace: rail, pane, and remembered file.
-async function showProjects() {
+// `forSession` is the terminal whose workspace this picker will set. Naming a
+// tab and choosing its workspace are the same act now — the tab label is
+// derived from the folder, so there is nothing else for a name to be.
+let _projectFor = null;
+
+async function showProjects(forSession) {
+    _projectFor = forSession || ACTIVE_SESSION;
     openSheet('Projects');
     const body = document.getElementById('sheet-body');
     body.textContent = 'Loading...';
@@ -1710,8 +1722,10 @@ async function showProjects() {
         d = await (await fetch('/api/projects')).json();
     } catch (e) { body.textContent = 'Could not list projects'; return; }
     const KIND_ICON = {code: '\u2328\ufe0f', info: '\ud83d\udcc4', charts: '\ud83d\udcca'};
+    const label = _projectFor === ACTIVE_SESSION
+        ? 'this terminal' : 'terminal ' + _projectFor;
     document.getElementById('sheet-title').textContent =
-        'Projects  \u00b7  ' + d.projects.length;
+        'Choose a workspace for ' + label + '  \u00b7  ' + d.projects.length + ' projects';
     body.innerHTML = '';
     const grid = document.createElement('div');
     grid.className = 'proj-grid';
@@ -1723,14 +1737,44 @@ async function showProjects() {
         grid.appendChild(cell);
     });
     body.appendChild(grid);
+
+    const custom = document.createElement('div');
+    custom.className = 'ar-open';
+    custom.textContent = 'use a custom label instead \u2026';
+    custom.onclick = () => renameTabPrompt(_projectFor, null);
+    body.appendChild(custom);
 }
 
 // Switching project clears the remembered file — it belonged to the old one.
+// If the picker was opened on another tab, the choice lands on THAT tab and we
+// switch to it, because choosing a workspace for a terminal you are not
+// looking at and then staying put is never what you meant.
 async function openProject(name) {
+    const target = _projectFor || ACTIVE_SESSION;
+    if (target !== ACTIVE_SESSION) {
+        await fetch('/api/workspace', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session: target, folder: name, file: ''}),
+        }).catch(() => {});
+        switchSession(target);        // this re-reads the workspace and the rail
+        refreshSessions();            // and relabels the tab
+        setStatus(name + ' → terminal ' + target);
+        return;
+    }
     wsSave({folder: name, file: ''});
     await loadRail(name);
     paneDefault();
+    refreshSessions();                // the tab label follows the folder
     setStatus(name);
+}
+
+// A custom label, for when the folder name is not what Patrick calls the
+// thing. Secondary on purpose: the derived name cannot drift, a typed one can.
+function renameTabPrompt(sid, current) {
+    const name = prompt('Custom label for terminal ' + sid +
+                        ' (blank = use the workspace folder):', current || '');
+    if (name === null) return;
+    renameSession(sid, name.trim());
 }
 
 
@@ -2393,7 +2437,7 @@ async function showBehavior() {
 // An observer rather than per-render calls because these panes re-render
 // constantly now (live refresh, tab switches, folder changes), and a per-site
 // approach would always be one forgotten call away from an unreachable row.
-const CLICKABLE = ['rail-row', 'gfile', 'ol-row', 'arm-row', 'arm-head',
+const CLICKABLE = ['tr', 'rail-head', 'gfile', 'ol-row', 'arm-row', 'arm-head',
                    'proj-cell', 'fv-cell', 'cp-bf', 'hs', 'gp-c', 'ar-row',
                    'ar-open', 'gb-hist', 'gb-live', 'gb-init', 'git-row',
                    'fv-num', 'gp-back', 'rec-row'];
@@ -3114,6 +3158,117 @@ function switchSession(id, chained) {
     }).catch(() => {});
 }
 
+
+// --- Workspace menu (right-click a tab) ------------------------------------
+// A floating explorer window at the pointer, not a takeover of the middle
+// pane. Right-clicking a tab is a quick act — "put this terminal on camino" —
+// and it should not cost you whatever you were reading in the viewer.
+//
+// It opens with the filter focused because there are 115 projects in /dev and
+// typing three letters beats scrolling a list that long.
+let _pmProjects = null;      // cached; /dev's folder list changes rarely
+
+async function showProjectMenu(sid, x, y) {
+    closeProjectMenu();
+    if (!_pmProjects) {
+        try {
+            _pmProjects = (await (await fetch('/api/projects')).json()).projects || [];
+        } catch (e) { setStatus('Could not list projects'); return; }
+    }
+
+    const cur = (sid === ACTIVE_SESSION) ? (_ws.folder || '') : null;
+    const menu = document.createElement('div');
+    menu.id = 'pmenu';
+    menu.innerHTML =
+        '<div class="pm-head">Workspace for terminal ' + sid + '</div>' +
+        '<input id="pm-filter" placeholder="type to filter…" autocomplete="off" ' +
+               'autocorrect="off" spellcheck="false">' +
+        '<div class="pm-list"></div>' +
+        '<div class="pm-foot">custom label…</div>';
+    document.body.appendChild(menu);
+
+    const list = menu.querySelector('.pm-list');
+    const KIND = {code: 'code', info: 'docs', charts: 'charts'};
+    let rows = [];
+
+    const draw = (q) => {
+        const needle = q.trim().toLowerCase();
+        const hits = _pmProjects.filter(p => !needle || p.name.toLowerCase().includes(needle));
+        list.innerHTML = '';
+        rows = hits.slice(0, 200).map(p => {
+            const el = document.createElement('div');
+            el.className = 'pm-row' + (p.name === cur ? ' current' : '');
+            el.innerHTML = '<span class="pm-name">' + esc(p.name) + '</span>' +
+                           '<span class="pm-kind">' + (KIND[p.kind] || '') + '</span>';
+            el.onclick = () => { closeProjectMenu(); _projectFor = sid; openProject(p.name); };
+            list.appendChild(el);
+            return el;
+        });
+        if (!rows.length) list.innerHTML = '<div class="pm-row pm-none">no match</div>';
+    };
+    draw('');
+
+    menu.querySelector('.pm-foot').onclick = () => {
+        closeProjectMenu();
+        renameTabPrompt(sid, null);
+    };
+
+    // Place it at the pointer, then pull it back inside the window.
+    const r = menu.getBoundingClientRect();
+    menu.style.left = Math.max(6, Math.min(x, window.innerWidth - r.width - 6)) + 'px';
+    menu.style.top = Math.max(6, Math.min(y - r.height - 8,
+                                          window.innerHeight - r.height - 6)) + 'px';
+
+    const input = menu.querySelector('#pm-filter');
+    input.focus();
+    let sel = -1;
+    input.addEventListener('input', () => { sel = -1; draw(input.value); });
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { closeProjectMenu(); return; }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (!rows.length) return;
+            rows.forEach(r2 => r2.classList.remove('hot'));
+            sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+            rows[sel].classList.add('hot');
+            rows[sel].scrollIntoView({block: 'nearest'});
+            return;
+        }
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            (sel >= 0 ? rows[sel] : rows[0])?.click();
+        }
+    });
+
+    // Any click outside closes it, on the next tick so this one does not.
+    setTimeout(() => document.addEventListener('mousedown', _pmOutside), 0);
+}
+
+function _pmOutside(e) {
+    const m = document.getElementById('pmenu');
+    if (m && !m.contains(e.target)) closeProjectMenu();
+}
+
+function closeProjectMenu() {
+    const m = document.getElementById('pmenu');
+    if (m) m.remove();
+    document.removeEventListener('mousedown', _pmOutside);
+}
+
+// Long-press = right-click on a touchscreen. 450ms, and it cancels if the
+// finger moves, so a swipe between terminals never opens the picker.
+function armLongPress(el, fn) {
+    let timer = null, moved = false;
+    const clear = () => { clearTimeout(timer); timer = null; };
+    el.addEventListener('touchstart', () => {
+        moved = false;
+        timer = setTimeout(() => { if (!moved) fn(); }, 450);
+    }, {passive: true});
+    el.addEventListener('touchmove', () => { moved = true; clear(); }, {passive: true});
+    el.addEventListener('touchend', clear);
+    el.addEventListener('touchcancel', clear);
+}
+
 // Pick black or white label text for a given tab color by perceived luminance
 // so bright accents (yellow, lime, amber) don't get unreadable white text.
 function _tabTextColor(hex) {
@@ -3151,9 +3306,12 @@ function createTabButton(s) {
     btn.onclick = () => switchSession(s.id);
     btn.oncontextmenu = (e) => {
         e.preventDefault();
-        const name = prompt('Rename tab:', s.name);
-        if (name && name.trim()) renameSession(s.id, name.trim());
+        showProjectMenu(s.id, e.clientX, e.clientY);
     };
+    armLongPress(btn, () => {
+        const r = btn.getBoundingClientRect();
+        showProjectMenu(s.id, r.left, r.top);
+    });
     return btn;
 }
 
@@ -3186,11 +3344,17 @@ function renderTabs() {
             pill.style.color = _tabTextColor(s.color);
         }
         pill.onclick = () => switchSession(s.id);
+        // Right-click (or long-press) a tab: the workspace explorer opens at
+        // the pointer. It does not take over the viewer — picking a folder is
+        // a quick act and should not cost you what you were reading.
         pill.oncontextmenu = (e) => {
             e.preventDefault();
-            const name = prompt('Rename terminal:', s.name);
-            if (name && name.trim()) renameSession(s.id, name.trim());
+            showProjectMenu(s.id, e.clientX, e.clientY);
         };
+        armLongPress(pill, () => {
+            const r = pill.getBoundingClientRect();
+            showProjectMenu(s.id, r.left, r.top);
+        });
         bar.appendChild(pill);
     });
 }

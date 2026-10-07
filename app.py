@@ -404,7 +404,15 @@ _NAMES_FILE = _SPARK_DIR / "terminal_names.txt"
 
 
 def _load_terminal_names():
-    """Return {id: name} for non-blank entries in terminal_names.txt."""
+    """Return {id: name} for meaningful entries in terminal_names.txt.
+
+    "Meaningful" excludes a name identical to the tab's own number. Found
+    2026-10-06: tabs 4 and 7 carried "4=4" and "7=7", which made the server
+    treat them as deliberately named, so the manual label beat the workspace
+    folder and those two tabs showed "4" and "7" while every other tab showed
+    its project. A name that only restates the id carries no information and
+    should not outrank the folder.
+    """
     names = {}
     try:
         for line in _NAMES_FILE.read_text(encoding="utf-8").splitlines():
@@ -413,7 +421,7 @@ def _load_terminal_names():
                 continue
             sid, _, name = line.partition("=")
             sid, name = sid.strip(), name.strip()
-            if sid and name:
+            if sid and name and name != sid:
                 names[sid] = name
     except OSError:
         pass
@@ -933,7 +941,15 @@ def rename_session():
     sid = data.get("id", "")
     name = (data.get("name") or "").strip()
     if not name:
-        return jsonify({"error": "No name"}), 400
+        # Blank is a real instruction: drop the custom label and let the tab
+        # go back to being named after its workspace folder.
+        for s in SESSIONS:
+            if s["id"] == sid:
+                _save_terminal_name(sid, "")
+                _apply_terminal_names()
+                logging.info(f"SESSION_RENAME {sid} -> (cleared)")
+                return jsonify({"ok": True, "cleared": True})
+        return jsonify({"error": "Unknown session"}), 400
     for s in SESSIONS:
         if s["id"] == sid:
             s["name"] = name
